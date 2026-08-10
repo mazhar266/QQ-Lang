@@ -4,34 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Docs only — no source, no Cargo project, no commits yet. `docs/plan.md` is the full spec (41 sections, 11 phases) and is the authority on design; `README.md` documents the API surface as it is meant to end up. Implementation follows §36 phase order, one reviewable commit per phase, starting with §41: Cargo project, module skeleton, error model, lexer, parser, AST, parser tests, and a `qql-parse` binary that prints the normalized query. Explicitly **not** in that first step: Quran JSON resolution, the source registry, or the FFI layer.
+Working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), and the `qql` CLI. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
-The project was respecified from C to Rust. If anything still reads like C (CMake, manual frees, `qql_error_t` return codes in core logic), it is stale — the plan is the current word.
+Not built yet: the FFI layer (plan §8, phase 9) — so the crate is `rlib` + binary only, with no `cdylib`/`staticlib`/`include/qql.h`. Hisnul Muslim (`HM`) has no data source in `sources/` and is not registered.
+
+The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
+
+Deliberate deviations from the plan, both fine to revisit:
+
+- `Source` has one `resolve` method, not `validate` + `resolve` — every check a dry run would do is the first thing `resolve` does, and nothing needs validation without resolution.
+- No `thiserror`. `Error` hand-rolls `Display` alongside the `code()` match it needed anyway, which keeps the dependency list at `serde` + `serde_json`.
 
 ## Commands
-
-Nothing exists to run yet. Once the crate lands:
 
 ```bash
 cargo build --release
 cargo test
-cargo test --test parser                     # single integration test file
-cargo test parse_range_inclusive             # single test by name
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo run --bin qql -- "Q:2:255"
-cargo run --bin qql -- --data ./data "Q:1;Q:2:255"
+cargo test --test parser                     # one integration test file
+cargo test invalid_queries                   # one test by name
+cargo run -- "Q:2:255"
+cargo run -- --parse "Q:2:1-5,255;Q:1;"      # parse only, no data access
+cargo run -- --data ./sources "B:1:1-3"
+cargo run -- --sources
 ```
 
-FFI work additionally needs:
+Note: `cargo fmt`, `cargo clippy`, and doctests do not run in this environment — no rustup, clippy is not installed, and `rustdoc` fails to load `libLLVM`. Use `cargo test --lib --bins --tests` to skip doctests. Clippy-clean under `-D warnings` is still the contract for CI.
+
+FFI work will additionally need:
 
 ```bash
 cargo +nightly miri test --test ffi
 cargo +nightly fuzz run parse
 cbindgen --config cbindgen.toml --output include/qql.h   # committed; CI diffs it
 ```
-
-Clippy-clean under `-D warnings` and `cargo fmt --check` are part of the build contract, not optional polish.
 
 ## Architecture
 
@@ -55,6 +60,11 @@ Consequences that are easy to get wrong:
 - The parser never reads files; the repository never parses queries.
 - The AST is plain structs (`Query` / `Reference` / `Range`), never `serde_json::Value`. Deriving `Serialize` on it is fine; *building* it from JSON is not.
 - `Reference` has no `select_all` field — empty `ranges` means "all". Expose it as `selects_all()`.
+- `Reference::expand(max)` in [src/ast.rs](src/ast.rs) is the one place that does ordering, within-reference dedup, and bounds checking. Resolvers call it; they must not re-implement any of the three.
+- `Repository` caches `Arc<dyn Any + Send + Sync>` keyed by path and downcasts on read, so it stays free of source-specific schemas. Schemas live next to their resolver.
+- Data is read straight from the `sources/` submodules in their upstream layout — no ETL step, no `data/` copy. Quran: `quran-json-arabic/dist/chapters/en/{surah}.json`. Hadith: `hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json`.
+- Hadith numbering: `B:C:N` is the N-th hadith *within chapter C*, matching the upstream per-chapter files. That is not the book-global citation number, which lives in `by_book/`. Documented in [src/sources/hadith.rs](src/sources/hadith.rs).
+- `HadithCollection` is one `Source` impl instantiated per collection. A new book in the nine is one line in `Registry::with_defaults`, not a new file.
 
 Behavioral contracts that tests exist to pin down:
 
