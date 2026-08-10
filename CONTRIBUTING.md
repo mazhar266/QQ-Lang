@@ -29,10 +29,10 @@ All three must be clean. If you touched `src/ffi.rs`:
 
 ```bash
 cargo +nightly miri test --test ffi
-cbindgen --config cbindgen.toml --output include/qql.h   # commit the result
+./scripts/c-smoke.sh
 ```
 
-The committed header must match what cbindgen generates. A drifted header is an ABI bug that ships silently.
+`include/qql.h` is hand-written and updated by hand. `scripts/c-smoke.sh` is what keeps it honest — it compiles a C client against the header under `-Wall -Wextra -Werror` and links it to the real library, so a drifted signature fails to build rather than shipping silently. That is a stronger check than diffing generated text, which is why there is no cbindgen step.
 
 New behavior comes with a test. Parser and resolver changes need both valid and invalid cases, and error tests assert the specific `Error` variant and its position — not just `is_err()`.
 

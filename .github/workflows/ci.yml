@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      # Compiles examples/c/basic.c against the hand-written include/qql.h and
+      # links it to the real library, so a signature that drifts from
+      # src/ffi.rs fails here.
+      - name: C ABI smoke test
+        run: ./scripts/c-smoke.sh
+
+  miri:
+    name: Miri (FFI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Miri
+        # Only the FFI tests — Miri cannot run the filesystem-backed resolver
+        # tests, and safe Rust covers the rest.
+        run: cargo miri test --test ffi
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      # A short run on every PR; the point is that the targets still build and
+      # nothing obvious regressed, not exhaustive coverage.
+      - name: Fuzz the parser
+        run: cargo fuzz run parse -- -max_total_time=60
+
+      - name: Fuzz the FFI boundary
+        run: cargo fuzz run ffi -- -max_total_time=60

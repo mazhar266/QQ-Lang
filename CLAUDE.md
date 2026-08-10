@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), and the `qql` CLI. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+Complete and working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 46 tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
-Not built yet: the FFI layer (plan §8, phase 9) — so the crate is `rlib` + binary only, with no `cdylib`/`staticlib`/`include/qql.h`. Hisnul Muslim (`HM`) has no data source in `sources/` and is not registered.
+Outstanding: Hisnul Muslim (`HM`) has no data in `sources/` — the user is gathering it, so `HM` is deliberately unregistered rather than half-built. The Dart binding is unverified (no Dart SDK in this environment); the C ABI beneath it is verified by `scripts/c-smoke.sh`.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
-Deliberate deviations from the plan, both fine to revisit:
+Deliberate deviations from the plan, all fine to revisit:
 
 - `Source` has one `resolve` method, not `validate` + `resolve` — every check a dry run would do is the first thing `resolve` does, and nothing needs validation without resolution.
-- No `thiserror`. `Error` hand-rolls `Display` alongside the `code()` match it needed anyway, which keeps the dependency list at `serde` + `serde_json`.
+- No `thiserror`. `Error` hand-rolls `Display` alongside the `code()` match it needed anyway, keeping dependencies at `serde` + `serde_json`.
+- `include/qql.h` is hand-written, not cbindgen output. `scripts/c-smoke.sh` compiles a C client against it under `-Werror` and links it to the real library, which catches drift harder than diffing generated text.
 
 ## Commands
 
@@ -28,15 +29,17 @@ cargo run -- --data ./sources "B:1:1-3"
 cargo run -- --sources
 ```
 
-Note: `cargo fmt`, `cargo clippy`, and doctests do not run in this environment — no rustup, clippy is not installed, and `rustdoc` fails to load `libLLVM`. Use `cargo test --lib --bins --tests` to skip doctests. Clippy-clean under `-D warnings` is still the contract for CI.
-
-FFI work will additionally need:
+FFI and parser work:
 
 ```bash
+./scripts/c-smoke.sh                    # C header + link check; run after touching src/ffi.rs
 cargo +nightly miri test --test ffi
 cargo +nightly fuzz run parse
-cbindgen --config cbindgen.toml --output include/qql.h   # committed; CI diffs it
 ```
+
+Note: `cargo fmt`, `cargo clippy`, doctests, cargo-fuzz, Miri, and Dart do **not** run in this environment — no rustup, clippy is not installed, `rustdoc` fails to load `libLLVM`, and there is no Dart SDK. Use `cargo test --lib --bins --tests` to skip doctests. All of them still run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and remain the contract.
+
+`scripts/c-smoke.sh` and `gcc` **do** work here — use them to verify anything FFI-related.
 
 ## Architecture
 
@@ -77,13 +80,13 @@ Behavioral contracts that tests exist to pin down:
 
 ## Safety and FFI
 
-`#![deny(unsafe_code)]` crate-wide, with a single `#[allow(unsafe_code)]` on `mod ffi`. That module is the entire audit surface.
+`#![deny(unsafe_code)]` crate-wide, with a single `#![allow(unsafe_code)]` inside [src/ffi.rs](src/ffi.rs). That module is the entire audit surface — ~230 lines, no query logic.
 
 - Every `extern "C"` function wraps its body in `catch_unwind`. A panic unwinding across the boundary is UB.
 - Null/invalid pointers and non-UTF-8 input return error JSON, never a crash.
 - `CString::into_raw` out, `qql_free_string` → `CString::from_raw` back. `qql_version()` is the one function returning a static string the caller must *not* free.
-- `Context::execute` takes `&mut self`, so the compiler prevents concurrent use. `Context` is `Send`, not forced `Sync`. C callers can share a pointer freely — that must be documented, since the compiler can't help there. `qql_execute()` uses a `OnceLock<Mutex<Context>>` default context and must survive lock poisoning.
-- The committed `include/qql.h` is cbindgen output. Drift is an ABI bug.
+- `Context::execute` takes `&mut self`, so the compiler prevents concurrent use. `Context` is `Send` (pinned by a test). C callers can share a pointer freely — hence the doc warning, since the compiler can't help there. `qql_execute()` uses a `OnceLock<Mutex<Context>>` reading `$QQL_DATA` (default `sources`), and recovers from lock poisoning with `unwrap_or_else(|e| e.into_inner())` rather than propagating a panic.
+- `qql_context_execute` never returns null and never returns invalid JSON — null ctx, null query, and invalid UTF-8 all serialize into `{"ok":false}`. `tests/ffi.rs` pins each case.
 
 Data files load lazily into a `Repository` cache owned by the `Context`, freed on drop.
 

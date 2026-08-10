@@ -123,6 +123,33 @@ fn invalid_queries() {
     }
 }
 
+/// The same invariant `cargo fuzz run parse` checks, in a form that runs on
+/// stable and in CI: parsing never panics, and expansion never tries to
+/// allocate its way out of a bad selector.
+#[test]
+fn parsing_never_panics_on_garbage() {
+    let alphabet = [
+        "", "Q", "q", "HM", ":", ";", ",", "-", "0", "1", "9", "4294967295",
+        "99999999999999999999", " ", "\t", "*", "\u{0}", "٢", "🕋", "\u{200b}",
+    ];
+
+    // Every pair and triple over a nasty alphabet — ~9000 queries.
+    for a in alphabet {
+        for b in alphabet {
+            let _ = parse(&format!("{a}{b}"));
+            for c in alphabet {
+                let query = format!("{a}{b}{c}");
+                if let Ok(parsed) = parse(&query) {
+                    for reference in &parsed.references {
+                        let _ = reference.expand(1000);
+                        let _ = reference.expand(0);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn errors_always_serialize_to_valid_json() {
     let error = parse("Q:2:5-1").unwrap_err();

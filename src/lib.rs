@@ -42,6 +42,7 @@
 mod ast;
 mod context;
 mod error;
+pub mod ffi;
 mod lexer;
 mod parser;
 mod record;
