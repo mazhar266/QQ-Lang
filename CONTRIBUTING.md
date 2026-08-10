@@ -10,38 +10,66 @@ Contributions are welcome — bug reports, tests, new source resolvers, data fix
   ```text
   QQL parser knows syntax.
   Source handlers know Islamic-book structure.
-  JSON repository knows storage.
-  Public API knows FFI.
+  Repository knows storage.
+  FFI module knows the C ABI.
   ```
 
   A change that puts source-specific logic in the lexer or parser will be rejected, no matter how small.
-- Don't grow the FFI surface without a reason. New public symbols need a justification in the PR.
+- Don't grow the FFI surface without a reason. New `extern "C"` symbols need a justification in the PR, and they change the ABI — which is public API for semver purposes.
 
 ## Before you open a PR
 
 ```bash
-cmake -S . -B build -DCMAKE_C_FLAGS="-Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined"
-cmake --build build
-ctest --test-dir build
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
-- No compiler warnings.
-- No sanitizer findings — leaks, use-after-free, and invalid reads/writes all count.
-- New behavior comes with a test. Parser and resolver changes need both valid and invalid cases.
+All three must be clean. If you touched `src/ffi.rs`:
+
+```bash
+cargo +nightly miri test --test ffi
+cbindgen --config cbindgen.toml --output include/qql.h   # commit the result
+```
+
+The committed header must match what cbindgen generates. A drifted header is an ABI bug that ships silently.
+
+New behavior comes with a test. Parser and resolver changes need both valid and invalid cases, and error tests assert the specific `Error` variant and its position — not just `is_err()`.
 
 ## Code style
 
-- C11. `-Wall -Wextra -Wpedantic` clean.
-- Small functions, descriptive names, `const` wherever it applies.
-- Explicit error returns (`qql_error_t`), never magic values.
-- No global mutable state. Everything lives in `qql_context_t`.
-- Every allocation has one clear owner; document it in a comment when it isn't obvious.
-- Never use `strcpy`, `sprintf`, or `gets`. Bounded or dynamically sized operations only.
-- Parser and lexer code must stay bounds-safe and deterministic — it should be fuzzable.
+- Rust 2021, stable toolchain. Nightly is only for `miri` and `cargo-fuzz`.
+- `#![deny(unsafe_code)]` is crate-wide. `unsafe` is allowed **only** in `src/ffi.rs`, and every block there needs a comment saying why it is sound.
+- No `unwrap()` or `expect()` in library code. Fine in tests and in the CLI binary.
+- No `panic!` reachable from a public API — and none that can reach the FFI boundary. Every `extern "C"` function catches unwinds.
+- No `as` casts on parsed input. Use `parse` / `TryFrom` and handle the error; integer overflow is a `QQL_EXPECTED_NUMBER`, not a wrap or a panic.
+- Prefer borrowing over cloning. The lexer borrows slices of the query; don't make it allocate.
+- Prefer exhaustive `match` over `_` wildcards where adding a variant should force a review — the error-code mapping especially.
+- Public items are documented (`#![deny(missing_docs)]`). Rustdoc is the API reference; don't duplicate it in the README.
+- Small functions. No giant `parse`.
+
+## Behavioral contracts
+
+These are easy to "fix" into breakage. Tests pin them; don't work around a failing one without reading [docs/plan.md](docs/plan.md) first.
+
+- Query order is preserved. No `.sort()`, no `BTreeSet` for item expansion.
+- Duplicates are removed *within* a reference, kept *across* references.
+- Every public entry point returns valid JSON, including on error.
+- Arabic is byte-for-byte identical from data file to output. Never `from_utf8_lossy` on scripture.
 
 ## Adding a source
 
-See [Adding a new source](README.md#adding-a-new-source) in the README. It should touch `src/sources/`, `src/source_registry.c`, `CMakeLists.txt`, `data/`, and nothing else.
+See [Adding a new source](README.md#adding-a-new-source) in the README. It should touch `src/sources/`, `src/registry.rs`, `data/`, and nothing else. If your diff touches `lexer.rs` or `parser.rs`, something is wrong with the approach.
+
+## Fuzzing
+
+The parser must never panic or hang on any input:
+
+```bash
+cargo +nightly fuzz run parse
+```
+
+If you change the lexer or parser, run it for a few minutes before opening the PR. Crashes found by the fuzzer are welcome as issues with the reproducing input attached.
 
 ## Text data
 
@@ -51,8 +79,8 @@ Arabic is authoritative and passes through unchanged — no normalization of tas
 
 - One logical change per PR. Match the phase structure in [docs/plan.md](docs/plan.md) where it applies.
 - Say what you changed, why, and how you tested it.
-- Open an issue first for anything that changes the grammar, the result JSON shape, or the public header.
+- Open an issue first for anything that changes the grammar, the result JSON shape, the `Source` trait, or the C ABI.
 
 ## Reporting bugs
 
-Include the query string, the output you got, the output you expected, and your platform and compiler. Parser bugs should come with the shortest query that reproduces them.
+Include the query string, the output you got, the output you expected, and your platform and Rust version (`rustc -V`). Parser bugs should come with the shortest query that reproduces them.

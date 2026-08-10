@@ -1,6 +1,6 @@
-# Build Quran Query Language (QQL) Native C Library
+# Build Quran Query Language (QQL) — Rust Library
 
-I want you to design and implement a small, portable native C library called **QQL — Quran Query Language**.
+I want you to design and implement a small, portable Rust library called **QQL — Quran Query Language**.
 
 The library will parse compact textual references to Islamic texts and resolve those references against local JSON data files.
 
@@ -13,9 +13,14 @@ The first version should support:
 - Hisnul Muslim
 - Easy addition of more sources without rewriting the parser
 
-The library must be written primarily in **portable C**, suitable for compilation using GCC or Clang.
+The library must be written in **safe, portable Rust**, building on stable toolchains.
 
-It should eventually be usable through:
+It should be usable both as:
+
+- an idiomatic Rust crate (`qql = "0.1"`), and
+- a C ABI shared/static library for everything else
+
+through:
 
 - Flutter / Dart FFI
 - Linux
@@ -26,7 +31,7 @@ It should eventually be usable through:
 - CLI applications
 - Other languages through a C ABI
 
-Do not couple the core library to Flutter.
+Do not couple the core library to Flutter, and do not let FFI concerns leak into the core types.
 
 ---
 
@@ -82,10 +87,10 @@ A separate resolver should understand the meaning of each source.
 
 # 2. Overall Architecture
 
-Separate the project into these layers:
+Separate the crate into these layers:
 
 ```text
-Input query
+Input query (&str)
     ↓
 Lexer / tokenizer
     ↓
@@ -95,22 +100,24 @@ QQL AST / normalized query representation
     ↓
 Validation
     ↓
-Source resolver
+Source resolver (trait object)
     ↓
 JSON data repository
     ↓
 Normalized result
     ↓
-JSON serializer
+JSON serializer (serde_json)
     ↓
-Returned UTF-8 string
+Returned UTF-8 String
 ```
 
-Keep these concerns independent.
+Keep these concerns in separate modules.
 
-The parser must not directly read Quran or Hadith JSON files.
+The parser module must not touch the filesystem or `serde_json`.
 
 The data loader must not contain query parsing logic.
+
+Module visibility should enforce this: everything is private to the crate except the public API surface re-exported from `lib.rs`.
 
 ---
 
@@ -158,34 +165,42 @@ Q:2:1-5, 255;
 Q : 2 : 255;
 ```
 
-Normalize source identifiers to uppercase.
+Normalize source identifiers to uppercase (ASCII-only uppercasing — `str::to_ascii_uppercase`, never locale-dependent).
 
 ---
 
 # 4. Abstract Syntax Tree
 
-Create an internal AST or normalized representation similar to:
+Create an internal AST similar to:
 
-```c
-typedef struct {
-    uint32_t from;
-    uint32_t to;
-} qql_range_t;
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Range {
+    pub from: u32,
+    pub to: u32,
+}
 
-typedef struct {
-    char *source;
-    uint32_t primary;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    pub source: String,
+    pub primary: u32,
+    pub ranges: Vec<Range>,
+}
 
-    qql_range_t *ranges;
-    size_t range_count;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Query {
+    pub references: Vec<Reference>,
+}
+```
 
-    bool select_all;
-} qql_reference_t;
+Note that `select_all` from a C design is not a separate field in Rust — an empty `ranges` vector already means "everything". Provide it as a method instead:
 
-typedef struct {
-    qql_reference_t *references;
-    size_t reference_count;
-} qql_query_t;
+```rust
+impl Reference {
+    pub fn selects_all(&self) -> bool {
+        self.ranges.is_empty()
+    }
+}
 ```
 
 For:
@@ -224,9 +239,9 @@ the logical representation should be equivalent to:
 ]
 ```
 
-Do not use JSON internally as the parser AST.
+Do not use `serde_json::Value` as the parser AST.
 
-Use C structs internally.
+Use plain Rust structs internally. Deriving `Serialize` on the AST is acceptable for debugging and for the `qql-parse` output, but the AST must never be *built* from JSON.
 
 ---
 
@@ -249,7 +264,7 @@ For Quran, a possible JSON representation could be:
       "ayat": [
         {
           "number": 1,
-          "ar": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+          "ar": "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
           "en": "In the name of Allah..."
         }
       ]
@@ -275,6 +290,8 @@ data/
     ...
 ```
 
+Define these shapes as `#[derive(Deserialize)]` structs, not as `serde_json::Value` trees — a malformed data file should fail at deserialization with a clear error, not deep inside the resolver.
+
 Prefer a design that does not require loading the entire Quran or all Hadith collections into memory.
 
 For the first implementation, source files may be loaded lazily.
@@ -283,7 +300,7 @@ For the first implementation, source files may be loaded lazily.
 
 # 6. Canonical Returned Result
 
-The public API should return a UTF-8 JSON string.
+The public API should return a UTF-8 JSON `String`.
 
 At minimum, each resolved text item should provide:
 
@@ -335,129 +352,120 @@ Do not reorder references unless explicitly requested.
 
 ---
 
-# 7. Simple API
+# 7. Rust API
 
-The most important public API should eventually be approximately:
+The primary API is the Rust one. FFI wraps it, not the other way round.
 
-```c
-char *qql_execute(const char *query);
-```
+```rust
+pub struct Context { /* ... */ }
 
-Example:
+impl Context {
+    pub fn new(data_dir: impl Into<PathBuf>) -> Self;
 
-```c
-char *json = qql_execute("Q:2:255;");
-```
+    /// Parse only. No filesystem access.
+    pub fn parse(query: &str) -> Result<Query, Error>;
 
-Returned value:
+    /// Parse, validate, resolve, and return structured records.
+    pub fn execute(&mut self, query: &str) -> Result<Vec<Record>, Error>;
 
-```json
-{
-  "ok": true,
-  "results": [
-    {
-      "source": "Q",
-      "primary": 2,
-      "number": 255,
-      "ar": "...",
-      "en": "..."
-    }
-  ]
+    /// Same as `execute`, but always returns JSON — including for errors.
+    pub fn execute_json(&mut self, query: &str) -> String;
 }
 ```
 
-Because this will be called through FFI, memory ownership must be explicit.
+`execute` returns `Result` because that is what Rust callers want. `execute_json` is the total function the FFI layer needs: it never fails, it serializes the error instead.
 
-Provide:
-
-```c
-void qql_free_string(char *ptr);
-```
-
-Flutter/Dart should therefore be able to do:
-
-```text
-qql_execute(...)
-    ↓
-Pointer<Utf8>
-    ↓
-convert to Dart String
-    ↓
-qql_free_string(...)
-```
-
-Never expose internal structures across the public FFI boundary unless necessary.
-
-Keep the ABI simple.
+Rust callers never see raw pointers and never free anything manually.
 
 ---
 
-# 8. Context-Based API
+# 8. C ABI / FFI Layer
 
-Also design a better long-running API.
+Everything `unsafe` lives in one module: `src/ffi.rs`. The rest of the crate is `#![deny(unsafe_code)]`.
 
-Example:
+```rust
+#[repr(C)]
+pub struct QqlContext {
+    _private: [u8; 0],
+}
 
-```c
-typedef struct qql_context qql_context_t;
+#[no_mangle]
+pub extern "C" fn qql_version() -> *const c_char;
 
-qql_context_t *qql_context_create(const char *data_directory);
+#[no_mangle]
+pub unsafe extern "C" fn qql_context_create(
+    data_directory: *const c_char,
+) -> *mut QqlContext;
 
-char *qql_context_execute(
-    qql_context_t *ctx,
-    const char *query
-);
+#[no_mangle]
+pub unsafe extern "C" fn qql_context_execute(
+    ctx: *mut QqlContext,
+    query: *const c_char,
+) -> *mut c_char;
 
-void qql_context_destroy(qql_context_t *ctx);
+#[no_mangle]
+pub unsafe extern "C" fn qql_context_destroy(ctx: *mut QqlContext);
 
-void qql_free_string(char *ptr);
+#[no_mangle]
+pub extern "C" fn qql_execute(query: *const c_char) -> *mut c_char;
+
+#[no_mangle]
+pub unsafe extern "C" fn qql_free_string(ptr: *mut c_char);
 ```
 
-Usage:
+Rules for this layer:
+
+- Every `extern "C"` function wraps its body in `std::panic::catch_unwind`. **A panic must never unwind across the FFI boundary** — that is undefined behavior. On catch, return a null pointer or a serialized `QQL_INTERNAL_ERROR` JSON string.
+- Null and invalid pointers are handled defensively: a null `ctx` or `query` returns an error JSON string, never a segfault.
+- Non-UTF-8 input from C returns `QQL_INVALID_CHARACTER` rather than panicking. Use `CStr::to_str()` and handle the `Err`.
+- Strings handed out are created with `CString::into_raw` and must come back through `qql_free_string`, which calls `CString::from_raw`. Never hand out a pointer into a Rust `String`'s buffer.
+- `qql_context_create` returns `Box::into_raw(Box::new(Context::new(..))) as *mut QqlContext`; `qql_context_destroy` reverses it with `Box::from_raw`. Destroying null is a no-op, not a crash.
+
+Usage from C:
 
 ```c
 qql_context_t *ctx = qql_context_create("./data");
-
-char *result = qql_context_execute(
-    ctx,
-    "Q:2:1-5,255;Q:1;"
-);
-
+char *result = qql_context_execute(ctx, "Q:2:1-5,255;Q:1;");
 printf("%s\n", result);
-
 qql_free_string(result);
 qql_context_destroy(ctx);
 ```
 
-Prefer this context-based design internally.
-
-The simple `qql_execute()` API may wrap a default context.
+The C header `include/qql.h` is generated by **cbindgen** and committed to the repository so C consumers do not need a Rust toolchain to get it. Regeneration is a documented command, and CI checks the committed header matches.
 
 ---
 
 # 9. Source Resolver Architecture
 
-Create an extensible source registry.
+Use a trait, not function pointers.
 
-Conceptually:
+```rust
+pub trait Source: Send + Sync {
+    /// Canonical code, uppercase, e.g. "Q".
+    fn code(&self) -> &'static str;
 
-```c
-typedef struct {
-    const char *code;
-    const char *name;
+    /// Display name, e.g. "Quran".
+    fn name(&self) -> &'static str;
 
-    qql_error_t (*validate)(
-        qql_context_t *,
-        const qql_reference_t *
-    );
+    /// Optional alternate codes accepted for this source.
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
 
-    qql_error_t (*resolve)(
-        qql_context_t *,
-        const qql_reference_t *,
-        qql_result_builder_t *
-    );
-} qql_source_handler_t;
+    /// Semantic validation. Numbers exist? Ranges in bounds?
+    fn validate(&self, repo: &mut Repository, reference: &Reference) -> Result<(), Error>;
+
+    /// Load and append records, preserving request order.
+    fn resolve(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error>;
+}
 ```
+
+The registry is a `HashMap<&'static str, Box<dyn Source>>` (or a static slice plus linear scan — there are fewer than twenty sources, so either is fine) built once when the `Context` is created.
 
 Then register:
 
@@ -470,12 +478,16 @@ HM → Hisnul Muslim resolver
 
 The core parser must not contain code such as:
 
-```c
-if (source == "Q") ...
-else if (source == "B") ...
+```rust
+match source {
+    "Q" => ...,
+    "B" => ...,
+}
 ```
 
-Source-specific behavior belongs in handlers.
+Source-specific behavior belongs in `impl Source for ...`.
+
+`Repository` is the thing that owns the lazy-loaded, cached JSON. Handlers receive it; they never open files themselves.
 
 ---
 
@@ -545,7 +557,7 @@ prefer returning:
 3
 ```
 
-rather than automatically sorting them.
+rather than automatically sorting them. Resist the temptation to reach for `.sort()` or a `BTreeSet` here — both would silently break this contract.
 
 ---
 
@@ -579,7 +591,7 @@ Q:2:255;Q:2:255;
 
 preserve both references unless a future deduplication option is explicitly enabled.
 
-Implement this distinction clearly.
+Implement this with an order-preserving pass: iterate the expanded item numbers, keep a `HashSet<u32>` of what has been emitted, and skip repeats. Do not collect into a set and iterate it — that destroys order.
 
 ---
 
@@ -608,12 +620,12 @@ Q:2:999
 UNKNOWN:1
 ```
 
-The parser should only know that values are integers.
+The parser should only know that values are integers. Integer overflow is a syntax error, not a panic: parse with `str::parse::<u32>()` and map the `Err` to `QQL_EXPECTED_NUMBER`. Never use `as` casts on untrusted input.
 
 The Quran resolver knows:
 
 ```text
-Surah must be 1..114
+Surah must be 1..=114
 Ayah must exist in that Surah
 ```
 
@@ -621,11 +633,41 @@ This separation is important.
 
 ---
 
-# 13. Error Result Format
+# 13. Error Model
 
 Never return malformed JSON.
 
-Errors should return something like:
+Define one error enum for the whole crate:
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("query is empty")]
+    EmptyQuery,
+    #[error("invalid character")]
+    InvalidCharacter { position: usize },
+    #[error("expected a source identifier")]
+    ExpectedSource { position: usize },
+    #[error("expected ':'")]
+    ExpectedColon { position: usize },
+    #[error("expected a number")]
+    ExpectedNumber { position: usize },
+    #[error("range start cannot be greater than range end")]
+    InvalidRange { position: usize },
+    #[error("unknown source '{code}'")]
+    UnknownSource { code: String },
+    #[error("reference not found")]
+    ReferenceNotFound,
+    #[error("data file not found: {path}")]
+    DataFileNotFound { path: String },
+    #[error("invalid data file: {path}")]
+    InvalidDataFile { path: String, source: serde_json::Error },
+    #[error("internal error")]
+    Internal,
+}
+```
+
+Errors serialize to a stable wire format:
 
 ```json
 {
@@ -638,7 +680,7 @@ Errors should return something like:
 }
 ```
 
-Possible error codes:
+The stable strings are produced by an explicit `fn code(&self) -> &'static str` on `Error` — a match with no wildcard arm, so adding a variant fails to compile until its wire code is chosen:
 
 ```text
 QQL_OK
@@ -658,15 +700,15 @@ QQL_OUT_OF_MEMORY
 QQL_INTERNAL_ERROR
 ```
 
-Create an enum for internal errors.
+`QQL_OUT_OF_MEMORY` exists for C-ABI parity; in Rust, allocation failure aborts, so it is only reachable from the FFI layer's `catch_unwind`.
 
-Public output can serialize enum values to stable strings.
+`position` is omitted from the JSON for variants that do not carry one — do not emit `"position": 0` as a placeholder.
 
 ---
 
 # 14. Parser Diagnostics
 
-Track character positions.
+Track byte offsets into the input.
 
 For example:
 
@@ -679,63 +721,45 @@ should be capable of producing an error position.
 
 Store at least:
 
-```c
-size_t offset;
+```rust
+position: usize   // byte offset from the start of the query
 ```
 
-Optional future support:
+Since the grammar is ASCII, byte offsets and character offsets agree for all *valid* queries. They can diverge if a query contains multi-byte garbage — document that `position` is a **byte** offset, and never slice a `&str` at an arbitrary offset without `is_char_boundary` or `get()`.
 
-```c
-line
-column
-```
-
-Since normal QQL queries are one line, offset is sufficient for now.
+Optional future support: line and column. Normal QQL queries are one line, so offset is sufficient for now.
 
 ---
 
 # 15. JSON Library
 
-Do not write a full JSON parser yourself.
+Use **serde** and **serde_json**.
 
-Choose a small, portable C JSON library.
+Reasoning:
 
-Good characteristics:
+- de facto standard in the Rust ecosystem, so no vendoring or build glue
+- `#[derive(Serialize, Deserialize)]` removes the entire hand-written mapping layer that a C implementation would need
+- UTF-8 correct by construction — Rust `String` is UTF-8, and `serde_json` escapes on output without touching the underlying scalar values
+- pure Rust, no C toolchain, so Android NDK / iOS / Windows cross-compilation stays trivial
+- streaming reader available (`serde_json::from_reader`) if data files grow
 
-- easy to vendor
-- supports UTF-8
-- works with GCC / Clang
-- works on Android/iOS/Linux/macOS/Windows
-- minimal dependencies
+Do not pull in `simd-json` or similar for v1. Query workloads are tiny; the data files are the only large input and they are cached after first load.
 
-Candidates may include:
-
-```text
-yyjson
-cJSON
-jansson
-```
-
-Choose one and explain why.
-
-Prefer performance, portability, and simple vendoring.
-
-Use the selected library for:
-
-1. reading source JSON files
-2. creating returned JSON
-
-Keep JSON-specific implementation isolated under something like:
+Keep JSON-specific code (file layout structs, reading, writing) isolated under:
 
 ```text
-src/json/
+src/repo/
 ```
+
+The rest of the crate should be able to compile in a world without `serde_json`, conceptually.
 
 ---
 
 # 16. Unicode
 
-All input and output strings must use UTF-8.
+All input and output strings are UTF-8. Rust's `String`/`&str` enforce this for free — the remaining risk is at the FFI boundary and in file reads, both of which must **reject** invalid UTF-8 rather than lossily convert it.
+
+Do not use `String::from_utf8_lossy` on Quran or Hadith text. Replacement characters silently corrupt scripture.
 
 Arabic must pass through unchanged.
 
@@ -750,67 +774,68 @@ Do not modify:
 
 Treat the source JSON text as authoritative.
 
+Note that `char` indexing, `len()`, and `to_uppercase()` are all wrong tools for Arabic. Uppercasing applies only to ASCII source codes; use `to_ascii_uppercase`.
+
 ---
 
 # 17. Directory Structure
 
-Create a maintainable project layout similar to:
+Create a maintainable crate layout similar to:
 
 ```text
 qql/
-├── CMakeLists.txt
+├── Cargo.toml
 ├── README.md
-├── LICENSE
+├── CONTRIBUTING.md
+├── LICENSE.md
+├── cbindgen.toml
 ├── include/
-│   └── qql/
-│       └── qql.h
+│   └── qql.h                  # generated by cbindgen, committed
 ├── src/
-│   ├── qql.c
-│   ├── context.c
-│   ├── context.h
-│   ├── lexer.c
-│   ├── lexer.h
-│   ├── parser.c
-│   ├── parser.h
-│   ├── ast.c
-│   ├── ast.h
-│   ├── error.c
-│   ├── error.h
-│   ├── result.c
-│   ├── result.h
-│   ├── source_registry.c
-│   ├── source_registry.h
+│   ├── lib.rs                 # public Rust API, re-exports
+│   ├── error.rs
+│   ├── lexer.rs
+│   ├── parser.rs
+│   ├── ast.rs
+│   ├── context.rs
+│   ├── record.rs              # Record + serialization
+│   ├── registry.rs
+│   ├── ffi.rs                 # the only unsafe module
 │   ├── sources/
-│   │   ├── quran.c
-│   │   ├── quran.h
-│   │   ├── bukhari.c
-│   │   ├── bukhari.h
-│   │   ├── muslim.c
-│   │   ├── muslim.h
-│   │   ├── hisnul_muslim.c
-│   │   └── hisnul_muslim.h
-│   └── json/
-│       ├── json_reader.c
-│       └── json_reader.h
-├── third_party/
+│   │   ├── mod.rs             # the Source trait
+│   │   ├── quran.rs
+│   │   ├── bukhari.rs
+│   │   ├── muslim.rs
+│   │   └── hisnul_muslim.rs
+│   ├── repo/
+│   │   ├── mod.rs             # Repository: lazy load + cache
+│   │   └── schema.rs          # Deserialize structs for data files
+│   └── bin/
+│       ├── qql.rs             # CLI
+│       └── qql_parse.rs       # phase-1 parse-only CLI
 ├── tests/
-│   ├── test_lexer.c
-│   ├── test_parser.c
-│   ├── test_quran.c
-│   ├── test_errors.c
+│   ├── parser.rs
+│   ├── quran.rs
+│   ├── errors.rs
+│   ├── ffi.rs
 │   └── fixtures/
+├── fuzz/
+│   └── fuzz_targets/
+│       └── parse.rs
+├── benches/
 ├── data/
 │   ├── quran/
 │   ├── bukhari/
 │   ├── muslim/
 │   └── hisnul_muslim/
 ├── examples/
-│   ├── basic.c
-│   └── cli.c
+│   └── basic.rs
 └── bindings/
     └── dart/
         └── README.md
 ```
+
+A single crate is preferred over a workspace for v1. Split out a `qql-ffi` crate only if the FFI surface starts pulling dependencies the core does not want.
 
 Adjust this structure when there is a strong technical reason.
 
@@ -818,98 +843,81 @@ Adjust this structure when there is a strong technical reason.
 
 # 18. Build System
 
-Use CMake.
+Use Cargo.
 
-Support at least:
+```toml
+[package]
+name = "qql"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "GPL-3.0-or-later"
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+```
 
 ```bash
-cmake -S . -B build
-cmake --build build
+cargo build --release
+cargo test
 ```
 
-Produce:
+Produces:
 
-Linux:
+| Platform | Shared | Static |
+| --- | --- | --- |
+| Linux | `libqql.so` | `libqql.a` |
+| Windows | `qql.dll` | `qql.lib` |
+| macOS | `libqql.dylib` | `libqql.a` |
 
-```text
-libqql.so
-```
+`rlib` keeps the crate usable as a normal Rust dependency; `cdylib` and `staticlib` serve FFI consumers. Note that building all three is slower — that is an accepted cost, not a reason to drop `rlib`.
 
-Windows:
+No symbol-export macros are needed. `#[no_mangle] pub extern "C"` exports from a `cdylib` on every platform.
 
-```text
-qql.dll
-```
-
-macOS:
-
-```text
-libqql.dylib
-```
-
-Also support static builds:
-
-```text
-libqql.a
-```
-
-Use symbol export macros in the public header.
-
-Example:
-
-```c
-#ifdef _WIN32
-#ifdef QQL_BUILD
-#define QQL_API __declspec(dllexport)
-#else
-#define QQL_API __declspec(dllimport)
-#endif
-#else
-#define QQL_API
-#endif
-```
-
-Apply `QQL_API` to public functions.
+Cross-compilation targets to verify: `aarch64-linux-android`, `aarch64-apple-ios`, `x86_64-pc-windows-msvc`. Since there is no C code in the dependency tree, `cargo build --target ...` should be sufficient.
 
 ---
 
-# 19. C ABI
+# 19. C ABI Compatibility
 
-The public header must compile as C and also work when included from C++.
+The generated header must compile as C and also work when included from C++. cbindgen emits the `extern "C"` guard automatically; verify it rather than assume it.
 
-Use:
+The opaque context type is emitted as an incomplete struct, so consumers cannot depend on its layout:
 
 ```c
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-...
-
-#ifdef __cplusplus
-}
-#endif
+typedef struct qql_context qql_context_t;
 ```
 
-Do not expose compiler-specific C++ ABI.
+Configure cbindgen (`cbindgen.toml`) with:
+
+- `language = "C"`
+- an include guard
+- `[export] prefix` rules so all symbols keep the `qql_` prefix
+- no auto-generated types for anything not in the FFI surface
+
+Regenerate and diff the header in CI. A drifted header is an ABI bug that ships silently.
 
 ---
 
 # 20. Thread Safety
 
-Design the library so separate contexts can safely be used by separate threads.
+Rust encodes this in the type system rather than in documentation, so use it.
 
-Avoid mutable global state.
+- `Context` holds the resolver registry and the mutable `Repository` cache. `execute` takes `&mut self`, so the compiler prevents concurrent use of a single context.
+- `Context` should be `Send`. Making it `Sync` is not required and should not be forced with interior mutability in v1.
+- Individual `Source` implementations are stateless and are `Send + Sync` (see §9).
+- Separate contexts on separate threads are safe by construction.
 
-If a default context exists for `qql_execute()`, document its thread-safety characteristics.
+At the FFI boundary this guarantee is lost — C callers can share a pointer freely. Document it explicitly: **one `qql_context_t` must not be used from two threads simultaneously.**
 
-Prefer:
+`qql_execute()` uses a process-wide default context behind a `Mutex` (`static DEFAULT: OnceLock<Mutex<Context>>`). It is therefore thread-safe but serialized, and it must recover from lock poisoning rather than propagate a panic across the boundary. Prefer explicit contexts for serious use.
 
-```text
-qql_context_t
-```
-
-for serious use.
+Avoid `static mut` and any global mutable state that is not behind a lock.
 
 ---
 
@@ -917,29 +925,21 @@ for serious use.
 
 Do not prematurely build a complicated cache.
 
-However, design the context so parsed JSON files can later be cached.
-
-A reasonable first implementation:
+A reasonable first implementation lives in `Repository`:
 
 ```text
 first query for Surah 2
     ↓
 load data/quran/002.json
     ↓
-parse
+deserialize into schema structs
     ↓
-keep parsed representation in qql_context_t
+insert into HashMap<(SourceCode, u32), Arc<SurahData>>
 ```
 
-Future queries reuse it.
+Future queries reuse it. The cache is owned by the `Context`, so it is freed when the context is dropped — no explicit teardown code, and no leak to test for.
 
-Free everything when:
-
-```c
-qql_context_destroy()
-```
-
-is called.
+No eviction policy in v1. If memory becomes a concern, an LRU is a later change confined to `Repository`.
 
 ---
 
@@ -968,9 +968,9 @@ Example:
 }
 ```
 
-For QQL v1, choose one internal canonical numbering scheme.
+In Rust this is a `Deserialize` struct with `alternate_numbers: HashMap<String, u32>` and `#[serde(default)]` so older files without the field still load.
 
-Document that numbering scheme.
+For QQL v1, choose one internal canonical numbering scheme and document it.
 
 Do not attempt to solve all edition-numbering differences inside the parser.
 
@@ -979,8 +979,6 @@ Do not attempt to solve all edition-numbering differences inside the parser.
 # 23. Hisnul Muslim
 
 Hisnul Muslim may have a simpler indexing model.
-
-Example:
 
 ```text
 HM:27
@@ -1006,7 +1004,7 @@ Its JSON could look like:
 
 The source-specific resolver decides how `HM:27` is interpreted.
 
-Again, keep this outside the parser.
+This source is the proof that the trait boundary works: it has no second-level numbering comparable to ayat, yet it must need zero parser changes.
 
 ---
 
@@ -1054,93 +1052,92 @@ ar
 en
 ```
 
-and allow source-specific metadata.
+and allow source-specific metadata. In Rust:
 
----
-
-# 25. Public API Version
-
-Expose version information:
-
-```c
-const char *qql_version(void);
-```
-
-Example:
-
-```text
-0.1.0
-```
-
-Follow semantic versioning.
-
----
-
-# 26. Proposed Public Header
-
-Aim for something roughly like:
-
-```c
-#ifndef QQL_H
-#define QQL_H
-
-#include <stddef.h>
-
-#ifdef _WIN32
-#ifdef QQL_BUILD
-#define QQL_API __declspec(dllexport)
-#else
-#define QQL_API __declspec(dllimport)
-#endif
-#else
-#define QQL_API
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef struct qql_context qql_context_t;
-
-QQL_API const char *qql_version(void);
-
-QQL_API qql_context_t *
-qql_context_create(const char *data_directory);
-
-QQL_API void
-qql_context_destroy(qql_context_t *ctx);
-
-QQL_API char *
-qql_context_execute(
-    qql_context_t *ctx,
-    const char *query
-);
-
-QQL_API char *
-qql_execute(const char *query);
-
-QQL_API void
-qql_free_string(char *ptr);
-
-#ifdef __cplusplus
+```rust
+#[derive(Debug, Clone, Serialize)]
+pub struct Record {
+    pub source: String,
+    pub collection: String,
+    pub ar: String,
+    pub en: String,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
-#endif
-
-#endif
 ```
 
-Modify it if needed, while preserving a very small FFI surface.
+`#[serde(flatten)]` puts source-specific keys at the top level of each record, matching the JSON above. `BTreeMap` rather than `HashMap` so key order in the output is deterministic and snapshot tests are stable.
+
+An enum of per-source record types is the alternative. It is more type-safe but forces every new source to edit a shared enum, which fights §40. Prefer the map for v1.
+
+---
+
+# 25. Versioning
+
+Expose version information from a single source of truth:
+
+```rust
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+```
+
+and over FFI:
+
+```rust
+#[no_mangle]
+pub extern "C" fn qql_version() -> *const c_char;
+```
+
+returning a `'static` NUL-terminated string that the caller must **not** free. Document that asymmetry — it is the one function whose return value does not go to `qql_free_string`.
+
+Follow semantic versioning. The C ABI is part of the public API for semver purposes.
+
+---
+
+# 26. Public Rust API Surface
+
+Aim for something roughly like `lib.rs`:
+
+```rust
+#![deny(unsafe_code)]
+#![deny(missing_docs)]
+
+mod ast;
+mod context;
+mod error;
+mod ffi;
+mod lexer;
+mod parser;
+mod record;
+mod registry;
+mod repo;
+mod sources;
+
+pub use ast::{Query, Range, Reference};
+pub use context::Context;
+pub use error::Error;
+pub use record::Record;
+pub use sources::Source;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Parse a query without touching the filesystem.
+pub fn parse(query: &str) -> Result<Query, Error>;
+```
+
+`#![deny(unsafe_code)]` at the crate root with a single `#[allow(unsafe_code)]` on `mod ffi` makes the unsafe boundary reviewable in one place and visible in every diff.
+
+Keep the FFI surface very small. Modify this shape if needed, but adding a public FFI function requires justification.
 
 ---
 
 # 27. CLI
 
-Create a simple command-line application for development.
-
-Example:
+Create a command-line application for development.
 
 ```bash
-./qql "Q:2:255"
+cargo run --bin qql -- "Q:2:255"
+./target/release/qql "Q:2:255"
+./target/release/qql --data ./data "Q:1;Q:2:255"
 ```
 
 Output:
@@ -1152,21 +1149,19 @@ Output:
 }
 ```
 
-Also support:
+Pretty-print with `serde_json::to_string_pretty` in the CLI. The library returns compact JSON unless configured otherwise.
 
-```bash
-./qql --data ./data "Q:1;Q:2:255"
-```
+Argument parsing: use `std::env::args` for v1. There are two flags. Do not add `clap` until the flag count justifies it.
 
-Pretty-print JSON in the CLI if practical.
-
-The native library itself should return compact JSON unless configured otherwise.
+Exit codes: `0` on `"ok": true`, `1` on `"ok": false`. The JSON goes to stdout either way so it stays pipeable into `jq`.
 
 ---
 
 # 28. Tests
 
 Tests are important.
+
+Unit tests live in `#[cfg(test)] mod tests` next to the code they test (lexer, parser internals). Integration tests in `tests/` exercise only the public API.
 
 Create parser tests for:
 
@@ -1188,7 +1183,7 @@ Q : 2 : 255
 Q:2:1-5, 255
 ```
 
-Invalid queries:
+Invalid queries — assert the specific `Error` variant *and* its position, not merely `is_err()`:
 
 ```text
 ""
@@ -1203,6 +1198,7 @@ Invalid queries:
 "Q:2:1-"
 "Q:2:5-1"
 "Q:2:1,,5"
+"Q:99999999999999999999"
 ```
 
 Semantic Quran validation:
@@ -1222,113 +1218,105 @@ Q:1:1-7
 Q:114
 ```
 
-UTF-8 tests must verify that Arabic survives:
+Order and duplicate contracts (§10, §11) get dedicated tests — they are the behaviors most likely to be "fixed" into breakage by a well-meaning refactor.
+
+UTF-8 tests must verify Arabic survives:
 
 ```text
-JSON file → native parser → returned JSON
+JSON file → deserialize → Record → serialize → returned JSON
 ```
 
-without corruption.
+byte-for-byte, including tashkeel and any zero-width characters in the fixture.
 
 ---
 
-# 29. Memory Tests
+# 29. Memory and Safety Testing
 
-Compile and run tests with sanitizers when available.
+Safe Rust removes the leak/use-after-free/double-free test burden for the core. What remains is the `unsafe` in `src/ffi.rs`, and it must be tested directly.
 
-For GCC/Clang:
+- Run FFI tests under **Miri**: `cargo +nightly miri test --test ffi`.
+- Test the abuse cases explicitly: null pointers, freeing twice (documented as UB but must not be reachable through the safe API), non-UTF-8 input, empty strings, destroying a context while a returned string is still alive (must be fine — the string is independently owned).
+- Verify no panic escapes: add a test with input engineered to panic internally and assert the FFI call returns an error JSON instead of aborting.
+- Optionally run the C-side example under ASan/LeakSanitizer to prove the `CString::into_raw` / `qql_free_string` pairing is balanced.
+
+Ownership rules are enforced by the borrow checker inside the crate; document them only at the FFI boundary, where the compiler cannot help.
+
+---
+
+# 30. Fuzzing
+
+The parser is a natural fuzz target and Rust makes this cheap.
 
 ```bash
--fsanitize=address,undefined
+cargo +nightly fuzz run parse
 ```
 
-Run queries repeatedly and verify:
-
-- no leaks
-- no use-after-free
-- no double-free
-- no invalid reads
-- no invalid writes
-
-Every allocation must have clear ownership.
-
-Document ownership rules in code comments where necessary.
-
----
-
-# 30. Fuzz-Friendly Parser
-
-Keep lexer/parser code deterministic and bounds-safe.
-
-Never read beyond the provided null-terminated string.
-
-Avoid unsafe functions such as:
-
-```c
-strcpy
-sprintf
-gets
+```rust
+// fuzz/fuzz_targets/parse.rs
+fuzz_target!(|data: &[u8]| {
+    if let Ok(s) = std::str::from_utf8(data) {
+        let _ = qql::parse(s);
+    }
+});
 ```
 
-Prefer bounded or dynamically sized operations.
+The invariant: `parse` never panics and never loops forever, for any input. Memory safety is already guaranteed, so the fuzzer is hunting panics — arithmetic overflow in debug, slicing on a non-char-boundary, unwrap on a malformed token, and unbounded allocation from something like `Q:1:1-4294967295`.
 
-The parser should be suitable for fuzzing later with libFuzzer/AFL++.
+That last case deserves thought before it is found by a fuzzer: expanding a huge range must not attempt a multi-gigabyte allocation. Bound the expansion or resolve ranges lazily.
+
+Also fuzz the FFI entry point with arbitrary bytes, since it accepts input that is not valid UTF-8.
 
 ---
 
 # 31. Performance Goals
 
-QQL queries are generally tiny.
-
-Parser performance does not need exotic optimization.
+QQL queries are tiny. Parser performance does not need exotic optimization.
 
 Prioritize:
 
 1. correctness
-2. memory safety
-3. predictable errors
-4. portability
-5. extensibility
+2. predictable errors
+3. portability
+4. extensibility
+5. speed
 
-The potentially expensive part is loading large Islamic-text datasets.
+The expensive part is loading large datasets. Use lazy loading and caching.
 
-Use lazy loading and caching where reasonable.
+Avoid allocation in the lexer — tokens should borrow `&str` slices from the input rather than copy. This is free in Rust and removes an entire class of C-style ownership work.
+
+Add `benches/` only when there is a number worth defending. Do not optimize against a guess.
 
 ---
 
-# 32. Flutter/Dart FFI Compatibility
+# 32. Flutter / Dart FFI Compatibility
 
 Do not implement the Flutter plugin yet.
 
 Make sure the native API can easily be called from Dart FFI.
 
-Expected Dart shape later:
+Expected Dart shape:
 
 ```dart
-final ptr = qqlExecute(
-  query.toNativeUtf8().cast()
-);
-
+final ptr = qqlContextExecute(ctx, query.toNativeUtf8().cast());
 final result = ptr.cast<Utf8>().toDartString();
-
 qqlFreeString(ptr);
 ```
 
 Therefore:
 
-- return null-terminated UTF-8
-- library owns result before return
-- caller owns returned buffer
-- caller releases it using `qql_free_string`
-- never require Dart to free native memory with Dart's allocator
+- return NUL-terminated UTF-8
+- the library owns the buffer before return
+- the caller owns the returned buffer
+- the caller releases it with `qql_free_string`
+- never require Dart to free Rust memory with Dart's allocator, or vice versa
+
+Build notes for later: `cdylib` for Android (`.so` per ABI via `cargo-ndk`), and a static library for iOS since App Store rules discourage loose dynamic libraries. Both fall out of the `crate-type` list in §18.
 
 ---
 
 # 33. Future Syntax
 
 Do not implement these yet unless they naturally fit the architecture.
-
-The language may later support options such as:
 
 ```text
 Q:2:255@en
@@ -1349,9 +1337,9 @@ Possibly:
 Q:2:255|translation=sahih
 ```
 
-Do not prematurely build these features.
+Do not prematurely build these.
 
-Just make the lexer/parser architecture extensible enough that adding tokens later is reasonable.
+Keep the `Token` enum and the parser structured so adding a variant is a compile-error-driven change: exhaustive `match` with no `_` arm means the compiler lists every site that must be updated. That property is worth more than any amount of speculative extension machinery.
 
 ---
 
@@ -1360,19 +1348,12 @@ Just make the lexer/parser architecture extensible enough that adding tokens lat
 Potential future aliases:
 
 ```text
-BUKHARI
-B
-
-MUSLIM
-M
-
-HISN
-HM
+BUKHARI → B
+MUSLIM  → M
+HISN    → HM
 ```
 
-For version 1, only canonical short codes are required.
-
-The source registry should make aliases easy to add later.
+For version 1, only canonical short codes are required. The `aliases()` method on the `Source` trait (§9) already reserves the mechanism; the registry indexes both the code and every alias at construction time.
 
 ---
 
@@ -1380,108 +1361,68 @@ The source registry should make aliases easy to add later.
 
 Maintain this distinction strictly.
 
-Parser:
-
 ```text
 Q:500:999
 ```
 
-may be syntactically valid.
-
-Quran resolver then rejects it semantically.
-
-Similarly:
+is syntactically valid. The Quran resolver then rejects it semantically.
 
 ```text
 XYZ:1:2
 ```
 
-is syntactically valid.
+is syntactically valid. The registry rejects `XYZ` as an unknown source.
 
-The source registry rejects:
-
-```text
-XYZ
-```
-
-as an unknown source.
-
-This separation must be reflected in the code architecture and tests.
+This separation must be reflected in the module structure and in the tests: `tests/parser.rs` must not need a `data/` directory to run, and must pass with the `sources` module effectively unused.
 
 ---
 
 # 36. Development Phases
 
-Implement the project incrementally.
-
-Do not generate everything in one huge unreviewable commit.
+Implement incrementally. Do not generate everything in one huge unreviewable commit.
 
 ## Phase 1 — Foundation
 
-Create:
+- Cargo project, `crate-type` set, dependencies pinned
+- module skeleton
+- error enum with wire codes and JSON serialization
+- CI: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`
 
-- directory structure
-- CMake project
-- public header
-- error infrastructure
-- basic tests
-- CLI skeleton
-
-Make sure everything compiles.
+Everything compiles and CI is green.
 
 ## Phase 2 — Lexer
 
-Implement tokenization.
+Implement tokenization with borrowed slices and byte offsets.
 
-Create tests.
-
-Possible token types:
-
-```text
-TOKEN_IDENTIFIER
-TOKEN_INTEGER
-TOKEN_COLON
-TOKEN_SEMICOLON
-TOKEN_COMMA
-TOKEN_DASH
-TOKEN_EOF
-TOKEN_INVALID
+```rust
+enum Token<'a> {
+    Ident(&'a str),
+    Integer(&'a str),
+    Colon,
+    Semicolon,
+    Comma,
+    Dash,
+    Eof,
+}
 ```
 
-Track offsets.
+Each token carries its start offset. Unit tests included.
 
 ## Phase 3 — Parser
 
-Implement:
+Implement `query`, `reference`, `selector`, `range`. Build the AST.
 
-```text
-query
-reference
-selector
-range
-```
+No cleanup code needed — `Drop` handles it, which is the single largest simplification over the C design.
 
-Build the C AST.
-
-Implement complete AST cleanup.
-
-Add parser tests.
+Add parser tests and the `qql-parse` binary.
 
 ## Phase 4 — JSON Integration
 
-Vendor/select the JSON library.
-
-Create JSON reader and writer abstractions.
-
-Test Arabic UTF-8.
+Add serde. Define data-file schema structs and the `Record` output type. Test Arabic round-trips byte-for-byte.
 
 ## Phase 5 — Source Registry
 
-Implement generic source registration and lookup.
-
-Register Quran.
-
-Unknown sources should return structured errors.
+Implement the `Source` trait and the registry. Register Quran. Unknown sources return `QQL_UNKNOWN_SOURCE`.
 
 ## Phase 6 — Quran Resolver
 
@@ -1495,101 +1436,63 @@ Q:surah:a,b,c
 Q:surah:a-b,c,d-e
 ```
 
-Use test fixture Quran data before importing an entire production dataset.
+Use fixture data before importing a production dataset.
 
 ## Phase 7 — Result Serialization
 
-Return stable JSON.
-
-Implement:
-
-```c
-qql_context_execute()
-qql_free_string()
-```
-
-Ensure all errors also return JSON.
+Stable JSON output. `Context::execute` and `execute_json`. All errors return JSON.
 
 ## Phase 8 — CLI
 
-Complete CLI execution.
+Complete `qql` execution with `--data`, pretty printing, and exit codes.
 
-Examples:
+## Phase 9 — FFI Layer
 
-```bash
-qql "Q:1"
-qql "Q:2:255"
-qql "Q:2:1-5,255"
-```
+`src/ffi.rs`, cbindgen config, committed `include/qql.h`, a C smoke-test example, and Miri tests. This lands **before** the remaining sources so the ABI is exercised early rather than bolted on at the end.
 
-## Phase 9 — Hadith Resolver
+## Phase 10 — Hadith Resolvers
 
-Add Bukhari first.
+Bukhari, then Muslim. Same parser, new `impl Source` only. If either phase touches `lexer.rs` or `parser.rs`, stop and reconsider the design.
 
-Use the same parser.
+## Phase 11 — Hisnul Muslim and Dart Verification
 
-Only the resolver should be new.
+Add the HM handler — a source with a different logical structure through the same parser.
 
-Then add Muslim.
-
-## Phase 10 — Hisnul Muslim
-
-Add HM source handler.
-
-Verify that sources with different logical structures still work through the same generic QQL parser.
-
-## Phase 11 — FFI Verification
-
-Compile shared library.
-
-Create a tiny Dart console test using `dart:ffi`.
-
-Do not build a full Flutter UI.
+Then a tiny Dart console test using `dart:ffi`. Not a Flutter UI.
 
 Verify:
 
 ```text
 Dart
 → qql_context_execute()
-→ C
+→ Rust
 → JSON data
-→ C JSON result
+→ JSON result
 → Dart String
+→ qql_free_string()
 ```
 
 ---
 
 # 37. Coding Style
 
-Use C11 unless there is a strong reason otherwise.
+Rust 2021 edition, stable toolchain. Nightly only for `miri` and `cargo-fuzz`.
 
-Compile with strict warnings:
-
-```text
--Wall
--Wextra
--Wpedantic
+```bash
+cargo fmt
+cargo clippy --all-targets -- -D warnings
 ```
 
-Prefer additionally during development:
+Rules:
 
-```text
--Werror
-```
-
-Keep functions small.
-
-Avoid giant parser functions.
-
-Use `const` aggressively.
-
-Do not hide ownership.
-
-Avoid global mutable variables.
-
-Use descriptive names.
-
-Prefer explicit error return values over magic values.
+- `#![deny(unsafe_code)]` crate-wide, allowed only on `mod ffi`.
+- No `unwrap()` or `expect()` in library code. They are fine in tests and acceptable in the CLI binary.
+- No `panic!` reachable from a public API. Errors are `Result`.
+- No `as` casts on parsed input; use `TryFrom` / `parse` and handle the error.
+- Prefer borrowing over cloning. The lexer borrows the query; the parser owns only what it must.
+- Keep functions small. Avoid a giant `parse` function.
+- Exhaustive `match` over `_` wildcards wherever adding a variant should force a review.
+- Public items are documented; `#![deny(missing_docs)]` enforces it.
 
 ---
 
@@ -1597,53 +1500,15 @@ Prefer explicit error return values over magic values.
 
 README should explain:
 
-## What QQL is
+- what QQL is, with `Q:2:1-5,255;Q:1;`
+- syntax: source, primary selector, ranges, commas, semicolons
+- build: `cargo build --release`
+- CLI usage
+- Rust usage, with a complete example
+- C / FFI usage and the ownership rule: `qql_context_execute` allocates, `qql_free_string` frees
+- how a future developer adds `T = Tirmidhi` without modifying parser logic
 
-Example:
-
-```text
-Q:2:1-5,255;Q:1;
-```
-
-## Syntax
-
-Explain source, primary selector, ranges, commas, and semicolons.
-
-## Build
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-## CLI
-
-```bash
-./build/qql "Q:2:255"
-```
-
-## C usage
-
-Provide a complete example.
-
-## FFI ownership
-
-Clearly explain:
-
-```text
-qql_context_execute() allocates
-qql_free_string() frees
-```
-
-## Adding a new source
-
-Document exactly how a future developer adds:
-
-```text
-T = Tirmidhi
-```
-
-without modifying parser logic.
+Rustdoc carries the API detail; the README should not duplicate it. `cargo doc --open` is the reference.
 
 ---
 
@@ -1659,14 +1524,14 @@ the library should:
 
 1. tokenize the input
 2. parse two references
-3. normalize their selectors
-4. locate source handler `Q`
+3. normalize their selectors (dedupe within, preserve order)
+4. look up the `Q` handler in the registry
 5. validate Surah/ayah numbers
-6. lazily load required Quran JSON files
+6. lazily load required Quran JSON files through `Repository`
 7. resolve requested ayat
 8. preserve requested ordering
-9. serialize them as UTF-8 JSON
-10. return an allocated `char *`
+9. serialize as UTF-8 JSON
+10. return a `String` (Rust) or an owned `*mut c_char` (FFI)
 
 Conceptual response:
 
@@ -1674,46 +1539,11 @@ Conceptual response:
 {
   "ok": true,
   "results": [
-    {
-      "source": "Q",
-      "collection": "Quran",
-      "surah": 2,
-      "ayah": 1,
-      "ar": "...",
-      "en": "..."
-    },
-    {
-      "source": "Q",
-      "collection": "Quran",
-      "surah": 2,
-      "ayah": 2,
-      "ar": "...",
-      "en": "..."
-    },
-    {
-      "source": "Q",
-      "collection": "Quran",
-      "surah": 2,
-      "ayah": 3,
-      "ar": "...",
-      "en": "..."
-    },
-    {
-      "source": "Q",
-      "collection": "Quran",
-      "surah": 2,
-      "ayah": 255,
-      "ar": "...",
-      "en": "..."
-    },
-    {
-      "source": "Q",
-      "collection": "Quran",
-      "surah": 1,
-      "ayah": 1,
-      "ar": "...",
-      "en": "..."
-    }
+    { "source": "Q", "collection": "Quran", "surah": 2, "ayah": 1,   "ar": "...", "en": "..." },
+    { "source": "Q", "collection": "Quran", "surah": 2, "ayah": 2,   "ar": "...", "en": "..." },
+    { "source": "Q", "collection": "Quran", "surah": 2, "ayah": 3,   "ar": "...", "en": "..." },
+    { "source": "Q", "collection": "Quran", "surah": 2, "ayah": 255, "ar": "...", "en": "..." },
+    { "source": "Q", "collection": "Quran", "surah": 1, "ayah": 1,   "ar": "...", "en": "..." }
   ]
 }
 ```
@@ -1727,8 +1557,8 @@ The most important architectural rule is:
 ```text
 QQL parser knows syntax.
 Source handlers know Islamic-book structure.
-JSON repository knows storage.
-Public API knows FFI.
+Repository knows storage.
+FFI module knows the C ABI.
 ```
 
 Do not mix these responsibilities.
@@ -1739,7 +1569,7 @@ I want to eventually be able to add a source such as:
 T:5:10
 ```
 
-by implementing and registering a Tirmidhi resolver without changing the lexer or parser.
+by writing `impl Source for Tirmidhi` and registering it, without changing the lexer or parser.
 
 ---
 
@@ -1747,28 +1577,28 @@ by implementing and registering a Tirmidhi resolver without changing the lexer o
 
 Start by inspecting the current repository.
 
-If it is empty, initialize the structure described above.
+If it has no source, initialize the crate described above.
 
 Then implement only:
 
-1. CMake project
-2. public API skeleton
-3. error model
+1. Cargo project with `crate-type = ["rlib", "cdylib", "staticlib"]`
+2. module skeleton and public API surface
+3. error model with wire codes
 4. lexer
 5. parser
 6. AST
-7. parser unit tests
-8. simple CLI that can parse and display a normalized query
+7. parser unit and integration tests
+8. a `qql-parse` binary that prints the normalized query
 
-Do **not** implement Quran JSON resolution in the first step.
+Do **not** implement Quran JSON resolution, the source registry, or the FFI layer in the first step.
 
 For example:
 
 ```bash
-./qql-parse "Q:2:1-5,255;Q:1;Q:3:2;"
+cargo run --bin qql-parse -- "Q:2:1-5,255;Q:1;Q:3:2;"
 ```
 
-should initially print something equivalent to:
+should print something equivalent to:
 
 ```json
 {
@@ -1800,9 +1630,7 @@ should initially print something equivalent to:
 }
 ```
 
-Run the tests.
-
-Fix compiler warnings.
+Run `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt --check`. Fix everything.
 
 Then show me:
 
