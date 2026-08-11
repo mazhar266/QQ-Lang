@@ -37,6 +37,31 @@ jobs:
       - name: C ABI smoke test
         run: ./scripts/c-smoke.sh
 
+  dart:
+    name: Dart binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Build the native library
+        run: cargo build --release
+
+      - name: Analyze
+        working-directory: bindings/dart
+        run: |
+          dart pub get
+          dart analyze
+
+      - name: Test
+        working-directory: bindings/dart
+        run: dart test
+
   miri:
     name: Miri (FFI)
     runs-on: ubuntu-latest

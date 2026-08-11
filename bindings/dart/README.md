@@ -3,25 +3,30 @@
 A plain `dart:ffi` wrapper over the C ABI. Not a Flutter plugin: the same file
 works in a console app and in a Flutter app.
 
-> **Unverified.** The Dart SDK is not installed in the development environment
-> this was written in, so [qql.dart](qql.dart) and
-> [example/main.dart](example/main.dart) have not been run. The C ABI they call
-> *is* verified — see `scripts/c-smoke.sh`, which compiles and links a C client
-> against the same symbols. Expect to fix small Dart-side details on first run.
-
-## Run the console test
+## Test
 
 ```bash
 cargo build --release          # from the repository root
 cd bindings/dart
 dart pub get
-dart run example/main.dart "Q:2:255;B:1:1;"
+dart test
 ```
 
-It verifies the whole path:
+Nine tests covering the whole path:
 
 ```text
 Dart → qql_context_execute() → Rust → JSON data → JSON result → Dart String → qql_free_string()
+```
+
+They pin the things the Rust tests cannot see from this side: Arabic arriving
+byte-identical to the data file, query order and within-reference dedup
+surviving the boundary, errors becoming `QqlException` with their code and
+position intact, and 200 consecutive executions leaving the context healthy.
+
+There is also a console demo:
+
+```bash
+dart run example/main.dart "Q:2:255;B:1:1;"
 ```
 
 ## Usage

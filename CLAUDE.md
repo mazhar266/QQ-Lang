@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Complete and working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 46 tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+Complete and working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 46 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
-Outstanding: Hisnul Muslim (`HM`) has no data in `sources/` — the user is gathering it, so `HM` is deliberately unregistered rather than half-built. The Dart binding is unverified (no Dart SDK in this environment); the C ABI beneath it is verified by `scripts/c-smoke.sh`.
+Outstanding: Hisnul Muslim (`HM`) has no data in `sources/` — the user is gathering it, so `HM` is deliberately unregistered rather than half-built.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -37,9 +37,16 @@ cargo +nightly miri test --test ffi
 cargo +nightly fuzz run parse
 ```
 
-Note: `cargo fmt`, `cargo clippy`, doctests, cargo-fuzz, Miri, and Dart do **not** run in this environment — no rustup, clippy is not installed, `rustdoc` fails to load `libLLVM`, and there is no Dart SDK. Use `cargo test --lib --bins --tests` to skip doctests. All of them still run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and remain the contract.
+Dart binding:
 
-`scripts/c-smoke.sh` and `gcc` **do** work here — use them to verify anything FFI-related.
+```bash
+cargo build --release                    # the binding loads target/release/libqql.so
+cd bindings/dart && dart pub get && dart test
+```
+
+Note: `cargo fmt`, `cargo clippy`, doctests, cargo-fuzz, and Miri do **not** run in this environment — no rustup, clippy is not installed, `rustdoc` fails to load `libLLVM`. Use `cargo test --lib --bins --tests` to skip doctests. They still run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and remain the contract.
+
+`scripts/c-smoke.sh`, `gcc`, and `dart` **do** work here — use them to verify anything FFI-related.
 
 ## Architecture
 

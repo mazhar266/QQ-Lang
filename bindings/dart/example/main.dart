@@ -6,15 +6,22 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import 'dart:io' show Platform;
+
 import '../qql.dart';
+
+/// The build output lives outside the package during development, so point at
+/// it explicitly rather than relying on the default lookup.
+String get _library {
+  if (Platform.isWindows) return '../../target/release/qql.dll';
+  if (Platform.isMacOS) return '../../target/release/libqql.dylib';
+  return '../../target/release/libqql.so';
+}
 
 void main(List<String> args) {
   final query = args.isNotEmpty ? args.first : 'Q:2:255;B:1:1;';
 
-  final qql = Qql.open(
-    '../../sources',
-    libraryPath: '../../target/release/libqql.so',
-  );
+  final qql = Qql.open('../../sources', libraryPath: _library);
 
   try {
     print('qql ${qql.version}\n');

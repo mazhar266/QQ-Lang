@@ -1383,9 +1383,9 @@ This separation must be reflected in the module structure and in the tests: `tes
 
 Implement incrementally. Do not generate everything in one huge unreviewable commit.
 
-> **Status:** phases 1–10 are done. Phase 11 is done except Hisnul Muslim (no
-> data yet) and the Dart console run (verified by construction against the C
-> ABI, but not executed — no Dart SDK on the development machine).
+> **Status:** phases 1–11 are done, except Hisnul Muslim, which has no data
+> source yet. The Dart round trip in §36 phase 11 is verified — `dart test` in
+> `bindings/dart` runs it against the built library.
 >
 > Deviations, all deliberate and recorded where they apply: `Source` has one
 > `resolve` method instead of `validate` + `resolve` (§9); `Error` hand-rolls

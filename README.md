@@ -231,7 +231,12 @@ qql_free_string()      frees it
 
 ### Dart
 
-A `dart:ffi` binding lives in [bindings/dart/](bindings/dart/) — see its README for bundling and memory notes.
+A `dart:ffi` binding lives in [bindings/dart/](bindings/dart/) — see its README for testing, bundling, and memory notes.
+
+```bash
+cargo build --release
+cd bindings/dart && dart pub get && dart test
+```
 
 ```dart
 final qql = Qql.open('sources', libraryPath: 'target/release/libqql.so');
