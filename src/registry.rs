@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Source registry — code to handler, and nothing more.
 
 use crate::sources::{HadithCollection, HisnulMuslim, Quran, Source};

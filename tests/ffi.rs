@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! C ABI tests, including the abuse cases the compiler cannot rule out.
 //!
 //! Run these under Miri when the FFI layer changes:

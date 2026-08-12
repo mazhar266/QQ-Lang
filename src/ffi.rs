@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! C ABI.
 //!
 //! The only module in the crate where `unsafe` is allowed. Everything here is

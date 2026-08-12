@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! The C entry point accepts bytes that are not valid UTF-8, so it needs its
 //! own target rather than riding on `parse`.
 //!

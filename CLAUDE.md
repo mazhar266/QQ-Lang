@@ -105,4 +105,4 @@ Dependencies are deliberately few: `serde`, `serde_json`, `thiserror`. CLI arg p
 
 ## License
 
-GPL-3.0-or-later. New files carry that license; contributions are accepted under it (see `CONTRIBUTING.md`).
+GPL-3.0-or-later. Every source file starts with an `SPDX-License-Identifier: GPL-3.0-or-later` line and a copyright line; new files must too. Contributions are accepted under it (see `CONTRIBUTING.md`).

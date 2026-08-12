@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! The parser must never panic and never hang, for any input.
 //!
 //! Memory safety is already guaranteed by safe Rust, so this hunts panics:

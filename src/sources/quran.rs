@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Quran resolver.
 //!
 //! Reads `quran-json-arabic/dist/chapters/en/{surah}.json` — one file per

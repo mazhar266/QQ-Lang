@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Grammar tests. These must pass with no data directory present.
 
 use qql::{parse, Error, Range};

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! # QQL — Quran Query Language
 //!
 //! Parses compact textual references to Islamic texts and resolves them

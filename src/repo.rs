@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Lazy-loading, caching JSON repository.
 //!
 //! Knows storage and nothing else: it has no idea what a Surah or a hadith is.

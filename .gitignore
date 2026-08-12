@@ -1,5 +1,12 @@
 /target
 
+# Fuzzing — build output and generated corpora, not source
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/Cargo.lock
+
 # Dart
 .dart_tool/
 .packages

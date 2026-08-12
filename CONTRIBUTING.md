@@ -4,7 +4,12 @@ Contributions are welcome — bug reports, tests, new source resolvers, data fix
 
 ## Ground rules
 
-- QQL is licensed under **GPL-3.0-or-later**. By submitting a contribution you agree it is released under that license.
+- QQL is licensed under **GPL-3.0-or-later**. By submitting a contribution you agree it is released under that license. New source files start with:
+
+  ```rust
+  // SPDX-License-Identifier: GPL-3.0-or-later
+  // Copyright (C) 2026 Mazhar Ahmed
+  ```
 - Keep the layer boundaries intact:
 
   ```text

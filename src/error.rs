@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Error model.
 //!
 //! Every variant maps to a stable `QQL_*` wire code via [`Error::code`]. The

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! End-to-end tests against the real data in `sources/`.
 //!
 //! These need the git submodules checked out. If they are not, every test here

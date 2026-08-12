@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Hisnul Muslim resolver.
 //!
 //! Reads `Hisn-Muslim-Json/husn_en.json` — a single ~280 KB file holding all

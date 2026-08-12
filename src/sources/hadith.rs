@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Mazhar Ahmed
+
 //! Hadith resolver, shared by every collection in the nine books.
 //!
 //! Reads `hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json`. One
