@@ -8,7 +8,9 @@ use crate::error::Error;
 use crate::record::Record;
 use crate::registry::Registry;
 use crate::repo::Repository;
-use std::path::PathBuf;
+use crate::sources::{JsonSource, SourceSpec};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Holds the source registry and every data file loaded so far.
 ///
@@ -18,7 +20,11 @@ use std::path::PathBuf;
 pub struct Context {
     repo: Repository,
     registry: Registry,
+    manifest_loaded: bool,
 }
+
+/// Manifest of user-defined sources, read from the data directory if present.
+pub const MANIFEST: &str = "qql-sources.json";
 
 impl Context {
     /// Create a context reading data from `data_dir`.
@@ -28,6 +34,7 @@ impl Context {
         Context {
             repo: Repository::new(data_dir),
             registry: Registry::with_defaults(),
+            manifest_loaded: false,
         }
     }
 
@@ -37,8 +44,48 @@ impl Context {
     }
 
     /// Registered source codes.
+    ///
+    /// Call [`Context::load_manifest`] first if you want user-defined sources
+    /// included — otherwise they appear only after the first query, since the
+    /// manifest is read lazily.
     pub fn sources(&self) -> Vec<&str> {
         self.registry.codes()
+    }
+
+    /// Register a source described by a [`SourceSpec`].
+    ///
+    /// Sources are searched newest-first, so registering an existing code
+    /// shadows it — which is how a custom source replaces a built-in one.
+    ///
+    /// Note that the data-directory manifest is read on the *first query*, so
+    /// it lands after anything registered here. To override an entry the
+    /// manifest defines, call [`Context::load_manifest`] first.
+    pub fn register_spec(&mut self, spec: SourceSpec) {
+        self.registry.register(Box::new(JsonSource::new(spec)));
+    }
+
+    /// Register every source in a manifest file: a JSON array of specs.
+    ///
+    /// `path` is relative to the data directory.
+    pub fn add_sources_from(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        let specs: Arc<Vec<SourceSpec>> = self.repo.load(path)?;
+        for spec in specs.iter() {
+            self.register_spec(spec.clone());
+        }
+        Ok(())
+    }
+
+    /// Read `qql-sources.json` from the data directory, if it exists.
+    ///
+    /// Absent is not an error — most installations have no custom sources.
+    /// A malformed manifest *is* an error, surfaced as `QQL_INVALID_DATA_FILE`
+    /// rather than silently ignored.
+    pub fn load_manifest(&mut self) -> Result<(), Error> {
+        self.manifest_loaded = true;
+        if !self.repo.root().join(MANIFEST).exists() {
+            return Ok(());
+        }
+        self.add_sources_from(MANIFEST)
     }
 
     /// Parse, validate, and resolve.
@@ -47,6 +94,15 @@ impl Context {
     /// deduplicated against each other — `Q:2:255;Q:2:255;` yields two records.
     pub fn execute(&mut self, query: &str) -> Result<Vec<Record>, Error> {
         let parsed: Query = crate::parser::parse(query)?;
+
+        // Read the manifest on first use, matching how data files load. Doing
+        // it here rather than in `new` keeps construction infallible and means
+        // user-defined sources work through every surface — including the C
+        // ABI, which has no way to pass them in.
+        if !self.manifest_loaded {
+            self.load_manifest()?;
+        }
+
         let mut records = Vec::new();
 
         for reference in &parsed.references {

@@ -31,15 +31,21 @@ impl Registry {
     }
 
     /// Register an additional source.
+    ///
+    /// Reusing an existing code is allowed and shadows the earlier entry, so a
+    /// user manifest can deliberately replace a built-in source.
     pub fn register(&mut self, source: Box<dyn Source>) {
         self.sources.push(source);
     }
 
     /// Look up by canonical code or alias. `code` is expected uppercase, as
     /// the parser normalizes it.
+    ///
+    /// Searched newest-first so later registrations win.
     pub fn get(&self, code: &str) -> Option<&dyn Source> {
         self.sources
             .iter()
+            .rev()
             .find(|s| s.code() == code || s.aliases().contains(&code))
             .map(|s| s.as_ref())
     }

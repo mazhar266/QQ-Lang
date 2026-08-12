@@ -1,0 +1,8 @@
+{
+  "title": "First Chapter",
+  "lines": [
+    { "n": 1, "arabic": "بِسْمِ اللَّهِ", "translation": "In the name of Allah", "note": "opening" },
+    { "n": 2, "arabic": "الْحَمْدُ لِلَّهِ", "translation": "Praise be to Allah" },
+    { "n": 3, "arabic": "رَبِّ الْعَالَمِينَ", "translation": "Lord of the worlds" }
+  ]
+}

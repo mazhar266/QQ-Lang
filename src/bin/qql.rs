@@ -19,6 +19,8 @@ USAGE:
 
 OPTIONS:
     --data <DIR>   Data directory (default: ./sources)
+    --source <F>   Register sources from a manifest, relative to --data.
+                   Repeatable. <DIR>/qql-sources.json loads automatically.
     --parse        Print the parsed query instead of resolving it
     --compact      Emit compact JSON instead of pretty-printed
     --sources      List registered source codes
@@ -29,12 +31,14 @@ EXAMPLES:
     qql \"Q:2:255\"
     qql \"Q:2:1-5,255;Q:1;\"
     qql --data ./sources \"B:1:1-3\"
+    qql --source my-sources.json \"X:1:1\"
 ";
 
 fn main() -> ExitCode {
     let mut data = String::from("./sources");
     let mut parse_only = false;
     let mut compact = false;
+    let mut manifests: Vec<String> = Vec::new();
     let mut query: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
@@ -49,12 +53,29 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--sources" => {
-                let ctx = qql::Context::new(&data);
+                let mut ctx = qql::Context::new(&data);
+                // Surface user-defined sources too, which otherwise appear
+                // only once a query triggers the lazy load.
+                if let Err(e) = ctx.load_manifest() {
+                    eprintln!("warning: {e}");
+                }
+                for manifest in &manifests {
+                    if let Err(e) = ctx.add_sources_from(manifest) {
+                        eprintln!("warning: {e}");
+                    }
+                }
                 println!("{}", ctx.sources().join(" "));
                 return ExitCode::SUCCESS;
             }
             "--parse" => parse_only = true,
             "--compact" => compact = true,
+            "--source" => match args.next() {
+                Some(path) => manifests.push(path),
+                None => {
+                    eprintln!("error: --source needs a manifest path\n\n{USAGE}");
+                    return ExitCode::FAILURE;
+                }
+            },
             "--data" => match args.next() {
                 Some(dir) => data = dir,
                 None => {
@@ -92,7 +113,18 @@ fn main() -> ExitCode {
             Err(e) => e.to_json(&query),
         }
     } else {
-        qql::Context::new(&data).execute_value(&query)
+        let mut ctx = qql::Context::new(&data);
+        let mut failed = None;
+        for manifest in &manifests {
+            if let Err(e) = ctx.add_sources_from(manifest) {
+                failed = Some(e.to_json(&query));
+                break;
+            }
+        }
+        match failed {
+            Some(error) => error,
+            None => ctx.execute_value(&query),
+        }
     };
 
     let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);

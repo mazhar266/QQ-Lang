@@ -1,0 +1,25 @@
+[
+  {
+    "code": "x",
+    "name": "Poems",
+    "aliases": ["poem"],
+    "path": "poems/{primary}.json",
+    "items": "lines",
+    "ar": "arabic",
+    "en": "translation",
+    "primary_key": "chapter",
+    "container_metadata": { "chapter_title": "title" },
+    "metadata": { "note": "note" }
+  },
+  {
+    "code": "S",
+    "name": "Single File Book",
+    "path": "single.json",
+    "chapters": "book.chapters",
+    "chapter_id": "id",
+    "items": "entries",
+    "ar": "text",
+    "en": "en.deep",
+    "container_metadata": { "heading": "heading" }
+  }
+]

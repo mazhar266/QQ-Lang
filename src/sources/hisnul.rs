@@ -121,8 +121,8 @@ impl Source for HisnulMuslim {
         "Hisnul Muslim"
     }
 
-    fn aliases(&self) -> &[&str] {
-        &["HISN"]
+    fn aliases(&self) -> Vec<&str> {
+        vec!["HISN"]
     }
 
     fn resolve(

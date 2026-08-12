@@ -1,0 +1,8 @@
+{
+  "book": {
+    "chapters": [
+      { "id": 7, "heading": "Seventh", "entries": [ { "text": "سَبْعَة", "en": { "deep": "seven" } } ] },
+      { "id": 3, "heading": "Third", "entries": [ { "text": "ثَلَاثَة", "en": { "deep": "three" } }, { "text": "ثَلَاثَة ب", "en": { "deep": "three b" } } ] }
+    ]
+  }
+}

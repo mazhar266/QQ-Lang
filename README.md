@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 50 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 65 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -108,6 +108,7 @@ cargo run --bin qql -- "Q:2:255"
 | Option | Meaning |
 | --- | --- |
 | `--data <DIR>` | Data directory (default `./sources`) |
+| `--source <F>` | Register sources from a manifest, relative to `--data`. Repeatable. |
 | `--parse` | Print the parsed query instead of resolving it |
 | `--compact` | Compact JSON instead of pretty-printed |
 | `--sources` | List registered source codes |
@@ -277,7 +278,61 @@ The parser only knows that a reference is `IDENT : INT ( : selectors )`. It has 
 
 `unsafe` exists in exactly one module, `src/ffi.rs`. The rest of the crate is `#![deny(unsafe_code)]`.
 
-## Adding a new source
+## Adding a source without writing Rust
+
+Point QQL at your own JSON and give it a short code. Drop a `qql-sources.json` in the data directory and it is picked up automatically — no rebuild, and it works through the CLI, the C ABI, and Dart alike.
+
+```json
+[
+  {
+    "code": "X",
+    "name": "My Collection",
+    "aliases": ["MINE"],
+    "path": "mydata/{primary}.json",
+    "items": "lines",
+    "ar": "arabic",
+    "en": "translation",
+    "primary_key": "chapter",
+    "container_metadata": { "chapter_title": "title" },
+    "metadata": { "note": "note" }
+  }
+]
+```
+
+```bash
+qql --data ./mydata "X:1:2"
+qql --source other-sources.json "X:1:2"    # extra manifest, repeatable
+qql --data ./mydata --sources              # X now listed
+```
+
+| Key | Meaning |
+| --- | --- |
+| `code`, `name` | Short code and display name. Codes uppercase automatically. |
+| `aliases` | Extra codes that select this source. |
+| `path` | Data file, relative to the data directory. `{primary}` → one file per chapter; omit it for a single file. |
+| `items` | Dotted path to the array of items. Empty means the file *is* the array. |
+| `ar`, `en` | Dotted paths within an item, so `"english.text"` reaches nested fields. |
+| `chapters` + `chapter_id` | For single-file books: the chapter array, and the field to match against the primary. |
+| `item_id` | Match items by a field instead of by position. |
+| `primary_key` | Names the primary in output (`surah`, `chapter`, …). Defaults to `primary`. |
+| `metadata` | Extra output fields taken from the item: output key → dotted path. |
+| `container_metadata` | Same, taken from the chapter or file. |
+
+Everything else behaves as it does for built-in sources: query order preserved, duplicates dropped within a reference, ranges bounds-checked, errors as JSON.
+
+From Rust, skip the file entirely:
+
+```rust
+let mut ctx = qql::Context::new("mydata");
+ctx.register_spec(spec);                      // a SourceSpec
+ctx.add_sources_from("other-sources.json")?;  // or a whole manifest
+```
+
+Sources are searched newest-first, so registering an existing code shadows it. The data-directory manifest loads on the first query, so call `ctx.load_manifest()?` first if you mean to override something it defines.
+
+Reach for a real `impl Source` (below) when the data is too irregular for a mapping to express — the Hisnul Muslim resolver exists because its file has duplicate keys and a misspelled field.
+
+## Adding a new source in Rust
 
 Adding a collection requires **no** change to the lexer or parser.
 

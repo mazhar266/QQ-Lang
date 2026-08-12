@@ -60,7 +60,7 @@ pub use parser::parse;
 pub use record::Record;
 pub use registry::Registry;
 pub use repo::Repository;
-pub use sources::{HadithCollection, HisnulMuslim, Quran, Source};
+pub use sources::{HadithCollection, HisnulMuslim, JsonSource, Quran, Source, SourceSpec};
 
 /// Crate version, e.g. `"0.1.0"`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

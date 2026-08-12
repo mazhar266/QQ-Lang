@@ -64,7 +64,9 @@ These are easy to "fix" into breakage. Tests pin them; don't work around a faili
 
 ## Adding a source
 
-See [Adding a new source](README.md#adding-a-new-source) in the README. It should touch `src/sources/`, `src/registry.rs`, `data/`, and nothing else. If your diff touches `lexer.rs` or `parser.rs`, something is wrong with the approach.
+First check whether it needs code at all: a collection whose JSON maps cleanly onto paths and field names is a `SourceSpec` entry in a manifest, no Rust required — see [Adding a source without writing Rust](README.md#adding-a-source-without-writing-rust).
+
+Write an `impl Source` when the data is irregular enough that a mapping would need escape hatches. It should touch `src/sources/`, `src/registry.rs`, and nothing else. If your diff touches `lexer.rs` or `parser.rs`, something is wrong with the approach.
 
 ## Fuzzing
 

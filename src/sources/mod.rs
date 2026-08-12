@@ -5,10 +5,12 @@
 
 mod hadith;
 mod hisnul;
+mod json;
 mod quran;
 
 pub use hadith::HadithCollection;
 pub use hisnul::HisnulMuslim;
+pub use json::{JsonSource, SourceSpec};
 pub use quran::Quran;
 
 use crate::ast::Reference;
@@ -29,8 +31,12 @@ pub trait Source: Send + Sync {
     fn name(&self) -> &str;
 
     /// Alternate codes that also select this source.
-    fn aliases(&self) -> &[&str] {
-        &[]
+    ///
+    /// Returns owned references rather than a `&'static` slice so that
+    /// sources configured at runtime — see [`JsonSource`] — can carry aliases
+    /// too. Built-in sources return an empty `Vec`, which does not allocate.
+    fn aliases(&self) -> Vec<&str> {
+        Vec::new()
     }
 
     /// Validate, load, and append records — in the order the query asked for.
