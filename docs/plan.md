@@ -292,6 +292,12 @@ data/
 
 Define these shapes as `#[derive(Deserialize)]` structs, not as `serde_json::Value` trees — a malformed data file should fail at deserialization with a clear error, not deep inside the resolver.
 
+> **As built:** one exception, in the Hisnul Muslim resolver. Two objects in
+> that file repeat a key with different values, which serde's derive rejects as
+> a duplicate field, so a derived struct cannot load the file at all. Only the
+> innermost type is a `serde_json::Map` newtype with accessors; the levels
+> above it stay typed, and the reason is documented at the definition.
+
 Prefer a design that does not require loading the entire Quran or all Hadith collections into memory.
 
 For the first implementation, source files may be loaded lazily.
@@ -1008,6 +1014,25 @@ The source-specific resolver decides how `HM:27` is interpreted.
 
 This source is the proof that the trait boundary works: it has no second-level numbering comparable to ayat, yet it must need zero parser changes.
 
+> **As built:** it did need zero parser changes — the resolver, one registry
+> line, and the module export were the entire diff. The real data
+> (`Hisn-Muslim-Json/husn_en.json`) turned out messier than this sketch:
+>
+> - all 132 chapters live in one file under an `"English"` key, so the whole
+>   book loads once instead of per chapter;
+> - chapters are stored **out of numerical order** (position 0 is chapter 27),
+>   so lookups go by the `ID` field — indexing by position would return the
+>   wrong supplication silently;
+> - supplication IDs are global across the book (75, 76, … 267) rather than
+>   per-chapter, so the selector counts position within the chapter, keeping
+>   `HM:27:1` consistent with `Q:2:1` and `B:1:1`;
+> - the file carries a UTF-8 BOM, two objects repeat a key with different
+>   values, and one entry spells `ARABIC_TEXT` as `Text`.
+>
+> The BOM is stripped in `Repository` (storage), the rest is absorbed by the
+> resolver's accessors (schema). None of it reached the parser, which is the
+> point §40 was making.
+
 ---
 
 # 24. Result Metadata
@@ -1383,9 +1408,8 @@ This separation must be reflected in the module structure and in the tests: `tes
 
 Implement incrementally. Do not generate everything in one huge unreviewable commit.
 
-> **Status:** phases 1–11 are done, except Hisnul Muslim, which has no data
-> source yet. The Dart round trip in §36 phase 11 is verified — `dart test` in
-> `bindings/dart` runs it against the built library.
+> **Status:** phases 1–11 are done. The Dart round trip in phase 11 is
+> verified — `dart test` in `bindings/dart` runs it against the built library.
 >
 > Deviations, all deliberate and recorded where they apply: `Source` has one
 > `resolve` method instead of `validate` + `resolve` (§9); `Error` hand-rolls

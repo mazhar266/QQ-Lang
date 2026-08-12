@@ -58,7 +58,7 @@ impl Repository {
                 });
         }
 
-        let text = std::fs::read_to_string(&path).map_err(|e| match e.kind() {
+        let mut text = std::fs::read_to_string(&path).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => Error::DataFileNotFound {
                 path: path.display().to_string(),
             },
@@ -67,6 +67,14 @@ impl Repository {
                 detail: e.to_string(),
             },
         })?;
+
+        // JSON has no notion of a byte-order mark, so `serde_json` rejects one
+        // outright. Real-world data files carry them anyway — the Hisnul
+        // Muslim source does — and stripping it here keeps every resolver from
+        // having to care.
+        if let Some(stripped) = text.strip_prefix('\u{feff}') {
+            text = stripped.to_string();
+        }
 
         let value: Arc<T> =
             Arc::new(

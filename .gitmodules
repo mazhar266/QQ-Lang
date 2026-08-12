@@ -4,3 +4,6 @@
 [submodule "sources/hadith-json"]
 	path = sources/hadith-json
 	url = git@github.com:AhmedBaset/hadith-json.git
+[submodule "sources/Hisn-Muslim-Json"]
+	path = sources/Hisn-Muslim-Json
+	url = git@github.com:wafaaelmaandy/Hisn-Muslim-Json.git

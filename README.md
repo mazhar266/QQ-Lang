@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** working — parser, source registry, Quran and hadith resolvers, CLI, C ABI, and a Dart binding. Hisnul Muslim (`HM`) is the one planned source still missing its data. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 50 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -35,24 +35,26 @@ Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
 ### Source codes
 
-| Code | Collection | |
+| Code | Collection | `primary` is |
 | --- | --- | --- |
-| `Q` | Quran | |
-| `B` | Sahih al-Bukhari | |
-| `M` | Sahih Muslim | |
-| `AD` | Sunan Abi Dawud | |
-| `T` | Jami' at-Tirmidhi | |
-| `N` | Sunan an-Nasa'i | |
-| `IM` | Sunan Ibn Majah | |
-| `HM` | Hisnul Muslim | *no data source yet — not registered* |
+| `Q` | Quran | Surah, 1–114 |
+| `B` | Sahih al-Bukhari | chapter (kitab) |
+| `M` | Sahih Muslim | chapter |
+| `AD` | Sunan Abi Dawud | chapter |
+| `T` | Jami' at-Tirmidhi | chapter |
+| `N` | Sunan an-Nasa'i | chapter |
+| `IM` | Sunan Ibn Majah | chapter |
+| `HM` | Hisnul Muslim (alias `HISN`) | chapter, 1–132 |
 
 `qql --sources` prints the registered codes.
 
-### Hadith numbering
+### Numbering
 
-For hadith, `B:C:N` means **chapter C, the N-th hadith within that chapter** — `B:1:1` is the first hadith of Kitab Bad' al-Wahy. That is the numbering the upstream per-chapter data files use, and it is QQL's canonical scheme for v1.
+The selector always counts **position within the primary**, so `X:C:1` is the first item of `C` for every source. What differs is what `primary` means, and what that numbering is *not*:
 
-It is **not** the book-global number most citations use ("Bukhari 6018"). Mapping global numbers is a resolver concern and can be added later without touching the grammar.
+- **Quran** — `Q:2:255` is Surah 2, ayah 255. The universal numbering; no ambiguity.
+- **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy). This matches the upstream per-chapter files and is QQL's canonical scheme for v1. It is **not** the book-global number most citations use ("Bukhari 6018"); mapping those is a resolver concern and can be added later without touching the grammar.
+- **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27. Chapter numbers are the book's own, not array positions in the data file, which is stored out of order.
 
 ### Examples
 
@@ -62,8 +64,9 @@ Q:2:255                Ayat al-Kursi
 Q:2:1-5                ayat 1 through 5
 Q:2:1-5,10,20-25,255   mixed ranges and singles
 Q:1;Q:2:255;Q:112;     three references
-B:1:1-10               Bukhari, book 1, hadith 1–10
-HM:27                  Hisnul Muslim, item 27
+B:1:1-10               Bukhari, chapter 1, hadith 1–10
+HM:27                  Hisnul Muslim, all of chapter 27 (morning and evening remembrance)
+HM:27:1-3              the first three supplications of that chapter
 ```
 
 ### Ordering and duplicates
@@ -324,11 +327,14 @@ git submodule update --init
 sources/
   quran-json-arabic/dist/chapters/en/{1..114}.json     Arabic + English, one file per Surah
   hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json
+  Hisn-Muslim-Json/husn_en.json                        all 132 chapters in one file
 ```
 
 Files are read on first use and cached in the `Context` until it drops — `Q:2:255` loads roughly 50 KB, not the whole mushaf. There is no eviction policy.
 
-Both datasets carry their own licenses; see the submodule directories.
+The datasets carry their own licenses; see the submodule directories.
+
+Upstream data is taken as authoritative and is never rewritten, but it is not uniform. The Hisnul Muslim file in particular carries a UTF-8 BOM, stores its chapters out of numerical order, repeats a key in two entries, and misspells one field name. Those are absorbed where they belong — the BOM in [src/repo.rs](src/repo.rs) since it is a storage concern, the rest in [src/sources/hisnul.rs](src/sources/hisnul.rs) — rather than by patching the data.
 
 ## Contributing
 

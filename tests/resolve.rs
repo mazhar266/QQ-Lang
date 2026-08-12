@@ -151,6 +151,68 @@ fn resolves_hadith_through_the_same_parser() {
 }
 
 #[test]
+fn resolves_hisnul_muslim() {
+    let mut ctx = ctx!();
+
+    let records = ctx.execute("HM:1").unwrap();
+    assert_eq!(records.len(), 4);
+
+    let record = &records[0];
+    assert_eq!(record.source, "HM");
+    assert_eq!(record.collection, "Hisnul Muslim");
+    assert_eq!(record.extra["chapter"], 1);
+    assert_eq!(record.extra["number"], 1);
+    assert_eq!(record.extra["repeat"], 1);
+    assert!(!record.ar.is_empty());
+    assert!(record.en.contains("All praise is for Allah"));
+}
+
+/// The upstream file stores chapters out of order — array position 0 holds
+/// chapter 27. Indexing by position instead of by `ID` would silently return
+/// the wrong supplication, which is why this test exists.
+#[test]
+fn hisnul_chapters_are_found_by_id_not_by_array_position() {
+    let mut ctx = ctx!();
+
+    let first = &ctx.execute("HM:1:1").unwrap()[0];
+    assert_eq!(
+        first.extra["chapter_title"],
+        "supplications for when you wake up"
+    );
+
+    let twenty_seven = ctx.execute("HM:27").unwrap();
+    assert_eq!(twenty_seven.len(), 24);
+    assert_eq!(
+        twenty_seven[0].extra["chapter_title"],
+        "Words of remembrance for morning and evening"
+    );
+}
+
+/// Three quirks in the upstream file that a strict schema would choke on:
+/// duplicate keys, a misspelled `Text` key, and missing fields.
+#[test]
+fn hisnul_survives_the_upstream_data_quirks() {
+    let mut ctx = ctx!();
+
+    // The file carries a UTF-8 BOM and two objects with repeated keys. If
+    // either were mishandled, no HM query would resolve at all.
+    assert!(ctx.execute("HM:132").is_ok());
+
+    // HM:132:1 spells its Arabic key `Text` rather than `ARABIC_TEXT`.
+    let record = &ctx.execute("HM:132:1").unwrap()[0];
+    assert!(!record.ar.is_empty(), "the `Text` key fallback should apply");
+}
+
+#[test]
+fn source_aliases_resolve() {
+    let mut ctx = ctx!();
+    assert_eq!(
+        ctx.execute("HISN:1:1").unwrap()[0].extra["chapter"],
+        ctx.execute("HM:1:1").unwrap()[0].extra["chapter"]
+    );
+}
+
+#[test]
 fn missing_chapters_read_as_semantic_errors_not_storage_errors() {
     let mut ctx = ctx!();
     assert_eq!(
@@ -161,6 +223,13 @@ fn missing_chapters_read_as_semantic_errors_not_storage_errors() {
         ctx.execute("B:0:1").unwrap_err().code(),
         "QQL_REFERENCE_NOT_FOUND"
     );
+    for query in ["HM:0", "HM:133", "HM:1:99"] {
+        assert_eq!(
+            ctx.execute(query).unwrap_err().code(),
+            "QQL_REFERENCE_NOT_FOUND",
+            "for {query}"
+        );
+    }
 }
 
 #[test]

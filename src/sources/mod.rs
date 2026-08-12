@@ -1,9 +1,11 @@
 //! Source handlers: the only place that knows Islamic-book structure.
 
 mod hadith;
+mod hisnul;
 mod quran;
 
 pub use hadith::HadithCollection;
+pub use hisnul::HisnulMuslim;
 pub use quran::Quran;
 
 use crate::ast::Reference;

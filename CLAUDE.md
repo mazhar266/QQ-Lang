@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Complete and working: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 46 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
-
-Outstanding: Hisnul Muslim (`HM`) has no data in `sources/` — the user is gathering it, so `HM` is deliberately unregistered rather than half-built.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 50 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -72,9 +70,11 @@ Consequences that are easy to get wrong:
 - `Reference` has no `select_all` field — empty `ranges` means "all". Expose it as `selects_all()`.
 - `Reference::expand(max)` in [src/ast.rs](src/ast.rs) is the one place that does ordering, within-reference dedup, and bounds checking. Resolvers call it; they must not re-implement any of the three.
 - `Repository` caches `Arc<dyn Any + Send + Sync>` keyed by path and downcasts on read, so it stays free of source-specific schemas. Schemas live next to their resolver.
-- Data is read straight from the `sources/` submodules in their upstream layout — no ETL step, no `data/` copy. Quran: `quran-json-arabic/dist/chapters/en/{surah}.json`. Hadith: `hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json`.
+- Data is read straight from the `sources/` submodules in their upstream layout — no ETL step, no `data/` copy. Quran: `quran-json-arabic/dist/chapters/en/{surah}.json`. Hadith: `hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json`. Hisnul Muslim: `Hisn-Muslim-Json/husn_en.json` (one file, all 132 chapters).
 - Hadith numbering: `B:C:N` is the N-th hadith *within chapter C*, matching the upstream per-chapter files. That is not the book-global citation number, which lives in `by_book/`. Documented in [src/sources/hadith.rs](src/sources/hadith.rs).
 - `HadithCollection` is one `Source` impl instantiated per collection. A new book in the nine is one line in `Registry::with_defaults`, not a new file.
+- Hisnul Muslim chapters are stored **out of order** (array position 0 is chapter 27), so [src/sources/hisnul.rs](src/sources/hisnul.rs) looks them up by `ID`. Indexing by position silently returns the wrong supplication; a test pins this.
+- The HM file also has a UTF-8 BOM, two objects with duplicate keys, and one misspelled field. The BOM is stripped in [src/repo.rs](src/repo.rs) (storage concern); the rest is absorbed by `Supplication`, which is a `serde_json::Map` newtype with accessors rather than a derived struct — serde's derive rejects duplicate keys outright. That is the one deliberate exception to "no `Value` in schemas", and it is documented in place.
 
 Behavioral contracts that tests exist to pin down:
 
