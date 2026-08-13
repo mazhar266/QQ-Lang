@@ -215,6 +215,97 @@ fn source_aliases_resolve() {
     );
 }
 
+/// `B::100` skips the chapter and uses traditional book-wide numbering.
+#[test]
+fn flat_numbering_reads_across_the_whole_book() {
+    let mut ctx = ctx!();
+
+    let records = ctx.execute("B::100").unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].source, "B");
+    assert_eq!(records[0].extra["number"], 100);
+    // Tagged so a response mixing both forms stays unambiguous.
+    assert_eq!(records[0].extra["numbering"], "book");
+    // Hadith 100 of Bukhari sits in chapter 3, Kitab al-'Ilm.
+    assert_eq!(records[0].extra["chapter"], 3);
+    assert_eq!(records[0].extra["chapter_name_en"], "Knowledge");
+    assert!(!records[0].ar.is_empty());
+
+    // Ranges, order, and dedup behave as everywhere else.
+    let numbers: Vec<_> = ctx
+        .execute("B::100,1-3,2")
+        .unwrap()
+        .iter()
+        .map(|r| r.extra["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, [100, 1, 2, 3]);
+}
+
+/// The first hadith of chapter 1 *is* the first hadith of the book, for every
+/// collection. This is what catches the `id` / `idInBook` confusion: the
+/// `by_book` files number `id` across all nine books at once (Muslim starts at
+/// 7278), so using it would silently return the wrong hadith for everything
+/// except Bukhari.
+#[test]
+fn flat_and_chapter_numbering_agree_at_the_start_of_every_collection() {
+    let mut ctx = ctx!();
+
+    for code in ["B", "M", "AD", "T", "N", "IM"] {
+        let flat = ctx.execute(&format!("{code}::1")).unwrap();
+        let chaptered = ctx.execute(&format!("{code}:1:1")).unwrap();
+
+        assert_eq!(flat.len(), 1, "{code}::1");
+        assert_eq!(flat[0].ar, chaptered[0].ar, "{code}: Arabic differs");
+        assert_eq!(flat[0].en, chaptered[0].en, "{code}: English differs");
+        assert_eq!(flat[0].extra["chapter"], 1, "{code}: wrong chapter");
+    }
+}
+
+/// Sunan an-Nasa'i has a chapter numbered `35.2`, so chapter identifiers are
+/// not always integers. Forcing `u32` would fail the whole file.
+#[test]
+fn non_integer_chapter_ids_do_not_break_the_book_file() {
+    let mut ctx = ctx!();
+    assert!(ctx.execute("N::1-5").is_ok());
+    assert_eq!(ctx.execute("N::5768").unwrap().len(), 1);
+}
+
+#[test]
+fn flat_numbering_works_for_quran_and_hisnul_muslim() {
+    let mut ctx = ctx!();
+
+    // Global ayah 100 is Surah 2, ayah 93.
+    let ayah = &ctx.execute("Q::100").unwrap()[0];
+    assert_eq!(ayah.extra["surah"], 2);
+    assert_eq!(ayah.extra["ayah"], 93);
+    assert_eq!(ayah.extra["number"], 100);
+    assert_eq!(ayah.extra["numbering"], "book");
+    // Same text as addressing it by Surah and ayah.
+    assert_eq!(ayah.ar, ctx.execute("Q:2:93").unwrap()[0].ar);
+
+    // Supplication 75 opens chapter 27.
+    let dua = &ctx.execute("HM::75").unwrap()[0];
+    assert_eq!(dua.extra["chapter"], 27);
+    assert_eq!(dua.extra["number"], 75);
+    assert_eq!(dua.ar, ctx.execute("HM:27:1").unwrap()[0].ar);
+
+    assert_eq!(ctx.execute("Q::1").unwrap()[0].ar, ctx.execute("Q:1:1").unwrap()[0].ar);
+    assert_eq!(ctx.execute("Q::6236").unwrap()[0].extra["surah"], 114);
+}
+
+#[test]
+fn flat_references_are_bounds_checked() {
+    let mut ctx = ctx!();
+
+    for query in ["B::99999", "Q::6237", "HM::268", "Q::1-4294967295"] {
+        assert_eq!(
+            ctx.execute(query).unwrap_err().code(),
+            "QQL_REFERENCE_NOT_FOUND",
+            "for {query}"
+        );
+    }
+}
+
 #[test]
 fn missing_chapters_read_as_semantic_errors_not_storage_errors() {
     let mut ctx = ctx!();

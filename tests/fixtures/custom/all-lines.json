@@ -1,0 +1,8 @@
+{
+  "all": [
+    { "n": 1, "arabic": "بِسْمِ اللَّهِ", "translation": "In the name of Allah" },
+    { "n": 2, "arabic": "الْحَمْدُ لِلَّهِ", "translation": "Praise be to Allah" },
+    { "n": 3, "arabic": "رَبِّ الْعَالَمِينَ", "translation": "Lord of the worlds" },
+    { "n": 4, "arabic": "سَبْعَة", "translation": "seven" }
+  ]
+}

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 65 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 73 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -72,7 +72,9 @@ Consequences that are easy to get wrong:
 - `Reference::expand(max)` in [src/ast.rs](src/ast.rs) is the one place that does ordering, within-reference dedup, and bounds checking. Resolvers call it; they must not re-implement any of the three.
 - `Repository` caches `Arc<dyn Any + Send + Sync>` keyed by path and downcasts on read, so it stays free of source-specific schemas. Schemas live next to their resolver.
 - Data is read straight from the `sources/` submodules in their upstream layout — no ETL step, no `data/` copy. Quran: `quran-json-arabic/dist/chapters/en/{surah}.json`. Hadith: `hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json`. Hisnul Muslim: `Hisn-Muslim-Json/husn_en.json` (one file, all 132 chapters).
-- Hadith numbering: `B:C:N` is the N-th hadith *within chapter C*, matching the upstream per-chapter files. That is not the book-global citation number, which lives in `by_book/`. Documented in [src/sources/hadith.rs](src/sources/hadith.rs).
+- Two addressing modes: `B:C:N` is the N-th hadith *within chapter C* (from `by_chapter/`), and `B::N` is the traditional book-wide number (from `by_book/`). `Reference::primary` is `Option<u32>`; `None` is the `::` form. The parser only records the omission — what it means is each resolver's business. Flat records carry `"numbering": "book"` so a mixed response stays unambiguous.
+- **In `by_book/` files, `id` spans all nine books at once** (Bukhari 1..7277, Muslim 7278..14736, …); the per-book citation number is `idInBook`. Using `id` works for Bukhari and silently returns the wrong hadith everywhere else. A test asserts `X::1 == X:1:1` for all six collections.
+- Sunan an-Nasa'i has a chapter numbered `35.2`, so chapter ids deserialize as `serde_json::Number`, not `u32`.
 - `HadithCollection` is one `Source` impl instantiated per collection. A new book in the nine is one line in `Registry::with_defaults`, not a new file.
 - [src/sources/json.rs](src/sources/json.rs) adds sources from a `SourceSpec` — a JSON description of paths and field mappings — so users can register a collection without writing Rust. `qql-sources.json` in the data directory is read on the **first query**, not in `Context::new`; that keeps construction infallible and makes custom sources work through the C ABI, which has no way to pass them in. Consequence: explicit `register_spec` calls land *before* the manifest, so the manifest wins unless `load_manifest()` is called first. Registry lookup is newest-first.
 - Prefer a real `impl Source` over a spec when the data is irregular enough that a declarative mapping would need escape hatches.

@@ -25,7 +25,11 @@ pub struct Reference {
     /// Source code, normalized to uppercase.
     pub source: String,
     /// First-level index — Surah for Quran, chapter for Hadith.
-    pub primary: u32,
+    ///
+    /// `None` is the flat form `B::100`, where the primary is skipped and the
+    /// selector counts across the whole collection instead. The parser only
+    /// records that it was omitted; what that means is the resolver's business.
+    pub primary: Option<u32>,
     /// Selected items. Empty means "everything in `primary`".
     pub ranges: Vec<Range>,
 }
@@ -41,6 +45,19 @@ impl Reference {
     /// Whether this reference selects everything under `primary`.
     pub fn selects_all(&self) -> bool {
         self.ranges.is_empty()
+    }
+
+    /// Whether the primary was skipped — the `B::100` form.
+    pub fn is_flat(&self) -> bool {
+        self.primary.is_none()
+    }
+
+    /// `"B:1"`, or `"B:"` when the primary is skipped. For error messages.
+    pub fn label(&self) -> String {
+        match self.primary {
+            Some(primary) => format!("{}:{primary}", self.source),
+            None => format!("{}:", self.source),
+        }
     }
 
     /// Expand the selector into concrete item numbers.
@@ -62,8 +79,10 @@ impl Reference {
             if range.from == 0 || range.to > max {
                 return Err(Error::ReferenceNotFound {
                     detail: format!(
-                        "{}:{}:{}-{} is outside 1..={max}",
-                        self.source, self.primary, range.from, range.to
+                        "{}:{}-{} is outside 1..={max}",
+                        self.label(),
+                        range.from,
+                        range.to
                     ),
                 });
             }
@@ -84,7 +103,7 @@ mod tests {
     fn reference(ranges: &[(u32, u32)]) -> Reference {
         Reference {
             source: "Q".into(),
-            primary: 2,
+            primary: Some(2),
             ranges: ranges
                 .iter()
                 .map(|&(from, to)| Range { from, to })

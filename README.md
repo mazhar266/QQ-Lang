@@ -10,13 +10,14 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 65 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 73 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
 ```text
 query      := reference (';' reference)* ';'?
 reference  := source ':' primary (':' selector)?
+            | source ':' ':' selector
 selector   := item (',' item)*
 item       := integer | integer '-' integer
 source     := [A-Za-z][A-Za-z0-9_]*
@@ -30,6 +31,7 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | `-` | Inclusive range: `1-5` → 1, 2, 3, 4, 5 |
 | `,` | Joins items: `1-5,255` |
 | `;` | Separates references. Trailing `;` is optional. |
+| `::` | Skips the primary: `B::100` numbers across the whole collection. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
@@ -50,11 +52,26 @@ Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
 ### Numbering
 
-The selector always counts **position within the primary**, so `X:C:1` is the first item of `C` for every source. What differs is what `primary` means, and what that numbering is *not*:
+There are two ways to address an item, and every source supports both.
 
-- **Quran** — `Q:2:255` is Surah 2, ayah 255. The universal numbering; no ambiguity.
-- **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy). This matches the upstream per-chapter files and is QQL's canonical scheme for v1. It is **not** the book-global number most citations use ("Bukhari 6018"); mapping those is a resolver concern and can be added later without touching the grammar.
-- **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27. Chapter numbers are the book's own, not array positions in the data file, which is stored out of order.
+**Within a chapter** — `SOURCE:primary:n` counts from 1 inside `primary`:
+
+- **Quran** — `Q:2:255` is Surah 2, ayah 255.
+- **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy), matching the upstream per-chapter files.
+- **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27.
+
+**Across the whole book** — `SOURCE::n` skips the chapter and uses traditional continuous numbering, which is what citations normally mean:
+
+```text
+B::100        hadith 100 of Sahih al-Bukhari
+Q::100        the 100th ayah of the mushaf (Surah 2, ayah 93)
+HM::75        the 75th supplication of Hisnul Muslim
+B::1-10,255   ranges and lists work the same
+```
+
+Records from the flat form carry `"numbering": "book"`, so a single query mixing both forms — `B:1:1;B::100;` — stays unambiguous. They also still report the chapter they belong to.
+
+Bounds are the whole collection: 1–6236 for the Quran, 1–7277 for Bukhari, 1–267 for Hisnul Muslim.
 
 ### Examples
 
@@ -67,6 +84,8 @@ Q:1;Q:2:255;Q:112;     three references
 B:1:1-10               Bukhari, chapter 1, hadith 1–10
 HM:27                  Hisnul Muslim, all of chapter 27 (morning and evening remembrance)
 HM:27:1-3              the first three supplications of that chapter
+B::100                 Bukhari hadith 100, traditional book-wide numbering
+Q::1-7;B::1;           flat form mixes freely with the rest
 ```
 
 ### Ordering and duplicates
@@ -314,6 +333,7 @@ qql --data ./mydata --sources              # X now listed
 | `ar`, `en` | Dotted paths within an item, so `"english.text"` reaches nested fields. |
 | `chapters` + `chapter_id` | For single-file books: the chapter array, and the field to match against the primary. |
 | `item_id` | Match items by a field instead of by position. |
+| `flat` | Enables `X::100`: `{ "path", "items", "item_id" }` pointing at the collection numbered straight through. Without it, a flat reference is an error. |
 | `primary_key` | Names the primary in output (`surah`, `chapter`, …). Defaults to `primary`. |
 | `metadata` | Extra output fields taken from the item: output key → dotted path. |
 | `container_metadata` | Same, taken from the chapter or file. |

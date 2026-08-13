@@ -74,7 +74,14 @@ impl<'a> Parser<'a> {
         Ok(Query { references })
     }
 
-    /// `reference := source ':' primary (':' selector)?`
+    /// ```text
+    /// reference := source ':' primary (':' selector)?
+    ///            | source ':' ':' selector
+    /// ```
+    ///
+    /// The second form skips the primary — `B::100`. It requires both the
+    /// colon and a selector, so `Q:` and `Q::` stay the errors they were
+    /// rather than quietly becoming "the entire collection".
     fn reference(&mut self) -> Result<Reference, Error> {
         let token = self.peek();
         if token.kind != Kind::Ident {
@@ -91,7 +98,15 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let primary = self.integer()?;
+        if self.eat(Kind::Colon) {
+            return Ok(Reference {
+                source,
+                primary: None,
+                ranges: self.selector()?,
+            });
+        }
+
+        let primary = Some(self.integer()?);
 
         let ranges = if self.eat(Kind::Colon) {
             self.selector()?

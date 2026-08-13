@@ -124,6 +124,7 @@ fn specs_can_be_registered_from_rust_without_a_manifest() {
         primary_key: None,
         metadata: BTreeMap::new(),
         container_metadata: BTreeMap::new(),
+        flat: None,
     });
 
     let records = ctx.execute("ZZ:1:3").unwrap();
@@ -152,9 +153,51 @@ fn a_later_registration_shadows_an_earlier_code() {
         primary_key: None,
         metadata: BTreeMap::new(),
         container_metadata: BTreeMap::new(),
+        flat: None,
     });
 
     assert_eq!(ctx.execute("X:1:1").unwrap()[0].collection, "Replacement");
+}
+
+/// `X::4` — the collection numbered straight through, which a spec opts into
+/// with a `flat` block.
+#[test]
+fn custom_sources_can_declare_book_wide_numbering() {
+    let mut ctx = context();
+
+    let records = ctx.execute("X::4").unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].en, "seven");
+    assert_eq!(records[0].extra["number"], 4);
+    assert_eq!(records[0].extra["numbering"], "book");
+
+    // Order and dedup apply here too.
+    let numbers: Vec<_> = ctx
+        .execute("X::4,1-2,1")
+        .unwrap()
+        .iter()
+        .map(|r| r.extra["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, [4, 1, 2]);
+
+    assert_eq!(
+        ctx.execute("X::99").unwrap_err().code(),
+        "QQL_REFERENCE_NOT_FOUND"
+    );
+}
+
+/// Without a `flat` block the error says what to do about it, rather than
+/// falling back to something that might be the wrong text.
+#[test]
+fn a_source_without_flat_numbering_says_so() {
+    let mut ctx = context();
+    let error = ctx.execute("S::1").unwrap_err();
+
+    assert_eq!(error.code(), "QQL_REFERENCE_NOT_FOUND");
+    assert!(
+        error.to_string().contains("no book-wide numbering"),
+        "unhelpful message: {error}"
+    );
 }
 
 #[test]

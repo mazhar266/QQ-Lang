@@ -97,6 +97,25 @@ pub struct SourceSpec {
     /// Extra result fields taken from the chapter or file: output key → path.
     #[serde(default)]
     pub container_metadata: BTreeMap<String, String>,
+    /// Where to find the collection numbered straight through, for `X::100`.
+    ///
+    /// Without it, a flat reference to this source is a "not found" error
+    /// rather than a silent fallback to something that might be wrong.
+    #[serde(default)]
+    pub flat: Option<FlatSpec>,
+}
+
+/// The collection laid out as one continuous run of items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlatSpec {
+    /// Data file, relative to the data directory. No `{primary}` here.
+    pub path: String,
+    /// Dotted path to the array of items. Empty means the file is the array.
+    #[serde(default)]
+    pub items: String,
+    /// Field holding each item's number. Without it, items are positional.
+    #[serde(default)]
+    pub item_id: Option<String>,
 }
 
 /// A [`Source`] driven entirely by a [`SourceSpec`].
@@ -167,7 +186,10 @@ impl Source for JsonSource {
         reference: &Reference,
         out: &mut Vec<Record>,
     ) -> Result<(), Error> {
-        let primary = reference.primary;
+        let Some(primary) = reference.primary else {
+            return self.resolve_flat(repo, reference, out);
+        };
+
         let templated = self.spec.path.contains("{primary}");
         let path = self.spec.path.replace("{primary}", &primary.to_string());
 
@@ -260,6 +282,70 @@ impl Source for JsonSource {
     }
 }
 
+impl JsonSource {
+    /// `X::N` — the whole collection numbered straight through, which only
+    /// works if the spec says where that lives.
+    fn resolve_flat(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        let Some(flat) = &self.spec.flat else {
+            return Err(Error::ReferenceNotFound {
+                detail: format!(
+                    "{}:: (this source defines no book-wide numbering; add a \"flat\" block to its spec)",
+                    self.spec.code
+                ),
+            });
+        };
+
+        let root: std::sync::Arc<Value> = repo.load(&flat.path)?;
+        let items = at(&root, &flat.items)
+            .and_then(Value::as_array)
+            .ok_or_else(|| Error::InvalidDataFile {
+                path: flat.path.clone(),
+                detail: format!("no array at '{}'", flat.items),
+            })?;
+
+        let total = u32::try_from(items.len()).map_err(|_| Error::InvalidDataFile {
+            path: flat.path.clone(),
+            detail: "implausible item count".into(),
+        })?;
+
+        for number in reference.expand(total)? {
+            let item = match &flat.item_id {
+                Some(field) => items
+                    .iter()
+                    .find(|i| at(i, field).and_then(Value::as_u64) == Some(u64::from(number))),
+                None => items.get((number - 1) as usize),
+            }
+            .ok_or_else(|| Error::ReferenceNotFound {
+                detail: format!("{}::{number}", self.spec.code),
+            })?;
+
+            let mut extra: BTreeMap<String, Value> = BTreeMap::new();
+            extra.insert("number".to_string(), number.into());
+            extra.insert("numbering".to_string(), "book".into());
+            for (key, path) in &self.spec.metadata {
+                if let Some(value) = at(item, path) {
+                    extra.insert(key.clone(), value.clone());
+                }
+            }
+
+            out.push(Record {
+                source: self.spec.code.clone(),
+                collection: self.spec.name.clone(),
+                extra,
+                ar: text(item, &self.spec.ar),
+                en: text(item, &self.spec.en),
+            });
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +389,7 @@ mod tests {
             primary_key: None,
             metadata: BTreeMap::new(),
             container_metadata: BTreeMap::new(),
+            flat: None,
         });
         assert_eq!(source.code(), "X");
         assert_eq!(source.aliases(), ["MINE"]);

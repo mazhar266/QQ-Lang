@@ -10,13 +10,19 @@
 //!
 //! # Numbering
 //!
-//! `B:C:N` means **chapter C, the N-th hadith within that chapter**. The
-//! upstream `by_chapter` files renumber from 1 in every chapter, and QQL takes
-//! that as its canonical scheme for v1. It is *not* the book-global number
-//! most citations use ("Bukhari 6018"), which lives in the `by_book` files.
-//! Mapping global numbers is deliberately out of scope here — it is a resolver
-//! concern, not a parser one, so it can be added later without touching the
-//! grammar.
+//! Two addressing modes, both served here:
+//!
+//! - `B:C:N` — **chapter C, the N-th hadith within that chapter**, matching
+//!   the `by_chapter` files, which renumber from 1 in every chapter.
+//! - `B::N` — the **book-global** number most citations use ("Bukhari 6018"),
+//!   read from the `by_book` files, which number 1..n across the collection.
+//!
+//! Records from the flat form carry `"numbering": "book"` so the two cannot be
+//! confused when a single query mixes them.
+//!
+//! The `by_book` files are large — Bukhari is 12 MB — so they load only when a
+//! flat reference asks for one, and then stay cached for the life of the
+//! context.
 
 use crate::ast::Reference;
 use crate::error::Error;
@@ -26,6 +32,7 @@ use crate::sources::Source;
 use serde::Deserialize;
 
 const DIR: &str = "hadith-json/db/by_chapter/the_9_books";
+const BOOK_DIR: &str = "hadith-json/db/by_book/the_9_books";
 
 /// One hadith collection, identified by its data directory.
 #[derive(Debug, Clone, Copy)]
@@ -55,9 +62,36 @@ struct ChapterInfo {
     english: String,
 }
 
+/// The whole collection in one file, numbered 1..n.
+#[derive(Debug, Deserialize)]
+struct BookFile {
+    chapters: Vec<Chapter>,
+    hadiths: Vec<Hadith>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Chapter {
+    /// Not always an integer — Sunan an-Nasa'i has a chapter `35.2` — so this
+    /// keeps whatever number upstream used rather than forcing `u32` and
+    /// failing the whole file.
+    id: serde_json::Number,
+    arabic: String,
+    english: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct Hadith {
+    /// Position within the enclosing file. In `by_chapter` this restarts at 1
+    /// in every chapter; in `by_book` it is an identifier spanning *all nine
+    /// books* (Bukhari 1..7277, Muslim 7278..14736, …), which is why the flat
+    /// form must not use it.
     id: u32,
+    /// The per-book number, 1..n — what citations mean by "Bukhari 6018".
+    #[serde(rename = "idInBook")]
+    id_in_book: u32,
+    /// Matches [`Chapter::id`], so it carries the same caveat.
+    #[serde(rename = "chapterId")]
+    chapter_id: serde_json::Number,
     arabic: String,
     english: English,
 }
@@ -83,7 +117,11 @@ impl Source for HadithCollection {
         reference: &Reference,
         out: &mut Vec<Record>,
     ) -> Result<(), Error> {
-        let chapter_id = reference.primary;
+        // `B::100` — number across the whole book instead of within a chapter.
+        let Some(chapter_id) = reference.primary else {
+            return self.resolve_flat(repo, reference, out);
+        };
+
         if chapter_id == 0 {
             return Err(Error::ReferenceNotFound {
                 detail: format!("{}:0 (chapters start at 1)", self.code),
@@ -131,6 +169,62 @@ impl Source for HadithCollection {
                     ("chapter_name_ar".to_string(), chapter_ar.into()),
                     ("chapter_name_en".to_string(), chapter_en.into()),
                     ("number".to_string(), number.into()),
+                    ("narrator".to_string(), hadith.english.narrator.clone().into()),
+                ]
+                .into_iter()
+                .collect(),
+                ar: hadith.arabic.clone(),
+                en: hadith.english.text.clone(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl HadithCollection {
+    /// `B::N` — the N-th hadith of the collection in traditional numbering.
+    fn resolve_flat(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        let relative = format!("{BOOK_DIR}/{}.json", self.dir);
+        let book: std::sync::Arc<BookFile> = repo.load(&relative)?;
+
+        let total = u32::try_from(book.hadiths.len()).map_err(|_| Error::InvalidDataFile {
+            path: relative.clone(),
+            detail: "implausible hadith count".into(),
+        })?;
+
+        for number in reference.expand(total)? {
+            // `idInBook`, never `id` — see the field docs. Using `id` happens
+            // to work for Bukhari and silently returns the wrong hadith for
+            // every other collection.
+            let hadith = book
+                .hadiths
+                .iter()
+                .find(|h| h.id_in_book == number)
+                .ok_or_else(|| Error::ReferenceNotFound {
+                    detail: format!("{}::{number}", self.code),
+                })?;
+
+            let chapter = book.chapters.iter().find(|c| c.id == hadith.chapter_id);
+            let (chapter_ar, chapter_en) = match chapter {
+                Some(c) => (c.arabic.as_str(), c.english.as_str()),
+                None => ("", ""),
+            };
+
+            out.push(Record {
+                source: self.code.to_string(),
+                collection: self.name.to_string(),
+                extra: [
+                    ("chapter".to_string(), hadith.chapter_id.clone().into()),
+                    ("chapter_name_ar".to_string(), chapter_ar.into()),
+                    ("chapter_name_en".to_string(), chapter_en.into()),
+                    ("number".to_string(), number.into()),
+                    ("numbering".to_string(), "book".into()),
                     ("narrator".to_string(), hadith.english.narrator.clone().into()),
                 ]
                 .into_iter()

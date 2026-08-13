@@ -110,6 +110,14 @@ impl Supplication {
     fn audio(&self) -> &str {
         self.field("AUDIO")
     }
+
+    /// Book-global identifier, 1..267 in this data.
+    fn id(&self) -> Option<u32> {
+        self.0
+            .get("ID")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+    }
 }
 
 impl Source for HisnulMuslim {
@@ -132,7 +140,11 @@ impl Source for HisnulMuslim {
         out: &mut Vec<Record>,
     ) -> Result<(), Error> {
         let book: std::sync::Arc<Book> = repo.load(FILE)?;
-        let wanted = reference.primary;
+
+        // `HM::75` — supplication IDs run 1..267 across the whole book.
+        let Some(wanted) = reference.primary else {
+            return self.resolve_flat(&book, reference, out);
+        };
 
         // By ID, never by position — see the module docs.
         let chapter = book
@@ -166,6 +178,65 @@ impl Source for HisnulMuslim {
             .collect();
 
             // Present on most but not all entries; omit rather than emit "".
+            if !item.note().trim().is_empty() {
+                extra.insert("note".to_string(), item.note().into());
+            }
+            if !item.audio().trim().is_empty() {
+                extra.insert("audio".to_string(), item.audio().into());
+            }
+
+            out.push(Record {
+                source: self.code().to_string(),
+                collection: self.name().to_string(),
+                extra,
+                ar: item.arabic().to_string(),
+                en: item.english().to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl HisnulMuslim {
+    /// `HM::N` — the N-th supplication of the book, across every chapter.
+    fn resolve_flat(
+        &self,
+        book: &Book,
+        reference: &Reference,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        let total = u32::try_from(book.chapters.iter().map(|c| c.text.len()).sum::<usize>())
+            .map_err(|_| Error::InvalidDataFile {
+                path: FILE.to_string(),
+                detail: "implausible supplication count".into(),
+            })?;
+
+        for number in reference.expand(total)? {
+            // Items carry a book-global ID, so find it rather than counting.
+            let (chapter, item) = book
+                .chapters
+                .iter()
+                .find_map(|c| {
+                    c.text
+                        .iter()
+                        .find(|t| t.id() == Some(number))
+                        .map(|t| (c, t))
+                })
+                .ok_or_else(|| Error::ReferenceNotFound {
+                    detail: format!("HM::{number}"),
+                })?;
+
+            let mut extra: std::collections::BTreeMap<String, Value> = [
+                ("chapter".to_string(), chapter.id.into()),
+                ("chapter_title".to_string(), chapter.title.clone().into()),
+                ("number".to_string(), number.into()),
+                ("numbering".to_string(), "book".into()),
+                ("repeat".to_string(), item.repeat().into()),
+            ]
+            .into_iter()
+            .collect();
+
             if !item.note().trim().is_empty() {
                 extra.insert("note".to_string(), item.note().into());
             }

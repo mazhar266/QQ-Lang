@@ -14,7 +14,9 @@ use crate::sources::Source;
 use serde::Deserialize;
 
 const SURAH_COUNT: u32 = 114;
+const AYAH_COUNT: u32 = 6236;
 const DIR: &str = "quran-json-arabic/dist/chapters/en";
+const VERSE_DIR: &str = "quran-json-arabic/dist/verses";
 
 /// `Q` — the Quran.
 #[derive(Debug, Default)]
@@ -34,6 +36,24 @@ struct Verse {
     translation: String,
 }
 
+/// `dist/verses/{n}.json` — one file per ayah in mushaf order, carrying its
+/// Surah alongside, which is what makes `Q::100` resolvable without an index.
+#[derive(Debug, Deserialize)]
+struct GlobalVerse {
+    /// Ayah number within its Surah.
+    number: u32,
+    text: String,
+    translations: std::collections::BTreeMap<String, String>,
+    chapter: GlobalChapter,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlobalChapter {
+    id: u32,
+    name: String,
+    transliteration: String,
+}
+
 impl Source for Quran {
     fn code(&self) -> &str {
         "Q"
@@ -49,15 +69,20 @@ impl Source for Quran {
         reference: &Reference,
         out: &mut Vec<Record>,
     ) -> Result<(), Error> {
+        // `Q::100` — count ayat across the whole mushaf instead of within a
+        // Surah.
+        let Some(surah) = reference.primary else {
+            return self.resolve_flat(repo, reference, out);
+        };
+
         // The parser cheerfully accepts Q:0 and Q:115; rejecting them is this
         // module's job, not its.
-        if reference.primary == 0 || reference.primary > SURAH_COUNT {
+        if surah == 0 || surah > SURAH_COUNT {
             return Err(Error::ReferenceNotFound {
-                detail: format!("Surah {} (Quran has 1..=114)", reference.primary),
+                detail: format!("Surah {surah} (Quran has 1..=114)"),
             });
         }
 
-        let surah = reference.primary;
         let chapter: std::sync::Arc<Chapter> = repo.load(format!("{DIR}/{surah}.json"))?;
 
         let total = u32::try_from(chapter.verses.len()).map_err(|_| Error::InvalidDataFile {
@@ -92,6 +117,47 @@ impl Source for Quran {
                 .collect(),
                 ar: verse.text.clone(),
                 en: verse.translation.clone(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl Quran {
+    /// `Q::N` — the N-th ayah of the mushaf, 1..=6236.
+    fn resolve_flat(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        for number in reference.expand(AYAH_COUNT)? {
+            let verse: std::sync::Arc<GlobalVerse> =
+                repo.load(format!("{VERSE_DIR}/{number}.json"))?;
+
+            out.push(Record {
+                source: self.code().to_string(),
+                collection: self.name().to_string(),
+                extra: [
+                    ("surah".to_string(), verse.chapter.id.into()),
+                    ("surah_name_ar".to_string(), verse.chapter.name.clone().into()),
+                    (
+                        "surah_name_en".to_string(),
+                        verse.chapter.transliteration.clone().into(),
+                    ),
+                    ("ayah".to_string(), verse.number.into()),
+                    ("number".to_string(), number.into()),
+                    ("numbering".to_string(), "book".into()),
+                ]
+                .into_iter()
+                .collect(),
+                ar: verse.text.clone(),
+                en: verse
+                    .translations
+                    .get("en")
+                    .cloned()
+                    .unwrap_or_default(),
             });
         }
 
