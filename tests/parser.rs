@@ -5,6 +5,8 @@
 
 use qql::{parse, Error, Range};
 
+/// `(source, primary, ranges)`. An empty source string means the query left
+/// the code out, which the registry fills in at resolve time.
 fn refs(query: &str) -> Vec<(String, Option<u32>, Vec<(u32, u32)>)> {
     parse(query)
         .unwrap()
@@ -12,7 +14,7 @@ fn refs(query: &str) -> Vec<(String, Option<u32>, Vec<(u32, u32)>)> {
         .into_iter()
         .map(|r| {
             (
-                r.source,
+                r.source.unwrap_or_default(),
                 r.primary,
                 r.ranges
                     .into_iter()
@@ -108,6 +110,98 @@ fn the_primary_can_be_skipped() {
     );
 
     assert_eq!(refs("b :: 100"), refs("B::100"));
+}
+
+/// `q:1:2,3,2:3,4-6` — an integer followed by `:` starts a new group, so this
+/// is Surah 1 ayat 2,3 followed by Surah 2 ayat 3 and 4–6.
+#[test]
+fn a_reference_can_carry_several_groups() {
+    assert_eq!(
+        refs("q:1:2,3,2:3,4-6"),
+        [
+            ("Q".into(), Some(1), vec![(2, 2), (3, 3)]),
+            ("Q".into(), Some(2), vec![(3, 3), (4, 6)]),
+        ]
+    );
+
+    // The source applies to every group after it.
+    assert_eq!(
+        refs("B:1:1,2:5"),
+        [
+            ("B".into(), Some(1), vec![(1, 1)]),
+            ("B".into(), Some(2), vec![(5, 5)]),
+        ]
+    );
+
+    // A group with no selector means the whole primary.
+    assert_eq!(
+        refs("Q:1,2:255"),
+        [
+            ("Q".into(), Some(1), vec![]),
+            ("Q".into(), Some(2), vec![(255, 255)]),
+        ]
+    );
+    assert_eq!(
+        refs("Q:1,2,3"),
+        [
+            ("Q".into(), Some(1), vec![]),
+            ("Q".into(), Some(2), vec![]),
+            ("Q".into(), Some(3), vec![]),
+        ]
+    );
+
+    // A range is never a primary, so the trailing `:` here is a syntax error
+    // rather than a silently different reading.
+    assert_eq!(
+        parse("Q:1:1-5:3").unwrap_err().code(),
+        "QQL_INVALID_CHARACTER"
+    );
+}
+
+/// Omitting the source means the Quran. The parser records the omission; the
+/// registry decides what it means.
+#[test]
+fn the_source_may_be_omitted() {
+    // Empty string in this helper means "no source was written".
+    assert_eq!(refs("1"), [("".into(), Some(1), vec![])]);
+    assert_eq!(refs("2:255"), [("".into(), Some(2), vec![(255, 255)])]);
+    assert_eq!(
+        refs("1,2:255"),
+        [
+            ("".into(), Some(1), vec![]),
+            ("".into(), Some(2), vec![(255, 255)]),
+        ]
+    );
+    assert_eq!(
+        refs("1:2,3,2:3,4-6"),
+        [
+            ("".into(), Some(1), vec![(2, 2), (3, 3)]),
+            ("".into(), Some(2), vec![(3, 3), (4, 6)]),
+        ]
+    );
+
+    for reference in parse("1,2:255").unwrap().references {
+        assert!(reference.source.is_none());
+    }
+
+    // Mixes with explicit sources across a `;`.
+    assert_eq!(
+        refs("1:1;b:1:1"),
+        [
+            ("".into(), Some(1), vec![(1, 1)]),
+            ("B".into(), Some(1), vec![(1, 1)]),
+        ]
+    );
+
+    assert_eq!(refs(" 1 , 2 : 255 "), refs("1,2:255"));
+}
+
+/// `;` is only needed to change source; a trailing one is always optional.
+#[test]
+fn the_semicolon_separates_sources_only() {
+    assert_eq!(refs("Q:1,2"), refs("Q:1;Q:2"));
+    assert_eq!(refs("q:1;b:1"), refs("q:1;b:1;"));
+    assert_eq!(refs("1;b:1"), refs("1;b:1;"));
 }
 
 #[test]

@@ -13,7 +13,18 @@ pub struct Registry {
     sources: Vec<Box<dyn Source>>,
 }
 
+/// Source assumed when a query omits the code — `1,2:255` means `Q:1,2:255`.
+///
+/// This lives here rather than in the parser: which code is the default is a
+/// fact about the registered sources, not about the grammar.
+pub const DEFAULT_CODE: &str = "Q";
+
 impl Registry {
+    /// The code used when a reference names no source.
+    pub fn default_code(&self) -> &str {
+        DEFAULT_CODE
+    }
+
     /// The built-in sources.
     pub fn with_defaults() -> Self {
         Registry {

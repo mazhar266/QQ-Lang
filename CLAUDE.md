@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 73 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 79 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -64,7 +64,10 @@ FFI module knows the C ABI.
 
 Consequences that are easy to get wrong:
 
-- The parser knows only `IDENT : INT ( : ranges )`. It has no table of Surah counts and no `match source { "Q" => ... }`. `Q:500:999` and `XYZ:1:2` both parse cleanly; the Quran resolver rejects the first, the registry rejects the second. `tests/parser.rs` must pass without a `data/` directory.
+- The parser knows only the grammar. It has no table of Surah counts and no `match source { "Q" => ... }`. `Q:500:999` and `XYZ:1:2` both parse cleanly; the Quran resolver rejects the first, the registry rejects the second. `tests/parser.rs` must pass without a `data/` directory.
+- **Grouping:** an integer followed by `:` starts a new group, so `q:1:2,3,2:3,4-6` is Surah 1 ayat 2,3 *plus* Surah 2 ayat 3,4-6 — one written reference producing two `Reference` nodes. `Parser::group_follows` is the one-token lookahead that decides this; a range is never a primary, so `Q:1:1-5:3` errors.
+- **Optional source:** `Reference::source` is `Option<String>`; `1,2:255` parses with `None`. The parser must not learn that the default is `Q` — `Registry::DEFAULT_CODE` owns that, and `Context::execute` substitutes it so resolvers always see a concrete code.
+- `;` separates *sources*, not references; commas already join groups under one source. A trailing `;` is optional.
 - Adding a collection (`T` = Tirmidhi) means a new `src/sources/*.rs` with `impl Source`, one registry entry, one data directory — and zero lexer or parser edits. If a source change touches the parser, the design is being violated.
 - The parser never reads files; the repository never parses queries.
 - The AST is plain structs (`Query` / `Reference` / `Range`), never `serde_json::Value`. Deriving `Serialize` on it is fine; *building* it from JSON is not.

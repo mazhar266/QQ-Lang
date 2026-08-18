@@ -10,14 +10,16 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 73 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 79 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
 ```text
 query      := reference (';' reference)* ';'?
-reference  := source ':' primary (':' selector)?
-            | source ':' ':' selector
+reference  := (source ':')? body
+body       := ':' selector                 // B::100
+            | group (',' group)*
+group      := primary (':' selector)?
 selector   := item (',' item)*
 item       := integer | integer '-' integer
 source     := [A-Za-z][A-Za-z0-9_]*
@@ -25,15 +27,53 @@ source     := [A-Za-z][A-Za-z0-9_]*
 
 | Part | Meaning |
 | --- | --- |
-| **source** | Collection code, normalized to uppercase (`Q`, `B`, `M`, `HM`, …) |
-| **primary** | First-level index — Surah for Quran, book for Hadith, chapter for Hisnul Muslim |
+| **source** | Collection code, normalized to uppercase (`Q`, `B`, `M`, `HM`, …). **Optional — omitted means the Quran.** |
+| **primary** | First-level index — Surah for Quran, chapter for Hadith and Hisnul Muslim |
 | **selector** | Optional list of items within the primary. Omit it to select everything. |
 | `-` | Inclusive range: `1-5` → 1, 2, 3, 4, 5 |
-| `,` | Joins items: `1-5,255` |
-| `;` | Separates references. Trailing `;` is optional. |
+| `,` | Joins items, and joins groups: `1:2,3,2:5` |
+| `;` | Separates sources. Only needed to switch collection; a trailing one is optional. |
 | `::` | Skips the primary: `B::100` numbers across the whole collection. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
+
+### Groups
+
+One source can address several chapters at once. The rule: **an integer followed by `:` starts a new group**, so it is a primary rather than another selector item.
+
+```text
+q:1:2,3,2:3,4-6
+```
+
+> Surah 1 ayat 2 and 3, then Surah 2 ayat 3 and 4–6.
+
+```text
+Q:1,2:255        all of Surah 1, then Surah 2 ayah 255
+Q:1,2,3          three whole Surahs
+B:1:1,2:5        Bukhari chapter 1 hadith 1, then chapter 2 hadith 5
+```
+
+A range is never a primary, so `Q:1:1-5:3` is a syntax error rather than a second reading.
+
+### Omitting the source
+
+Leave the code out and the query is Quran:
+
+```text
+1                the whole of Surah 1
+2:255            Ayat al-Kursi
+1,2:255          all of Surah 1, then Surah 2 ayah 255
+1:2,3,2:3,4-6    groups work the same
+```
+
+`;` is only needed to change collection, and the last one can always be dropped:
+
+```text
+1:1;b:1:1        Quran 1:1, then Bukhari chapter 1 hadith 1
+q:1;b:1          same as q:1;b:1;
+```
+
+The parser does not know that `Q` is the default — it records that the code was omitted, and the registry substitutes `Q` when resolving.
 
 ### Source codes
 
@@ -86,6 +126,9 @@ HM:27                  Hisnul Muslim, all of chapter 27 (morning and evening rem
 HM:27:1-3              the first three supplications of that chapter
 B::100                 Bukhari hadith 100, traditional book-wide numbering
 Q::1-7;B::1;           flat form mixes freely with the rest
+1                      no source code — the whole of Surah 1
+1,2:255                all of Surah 1, then Surah 2 ayah 255
+q:1:2,3,2:3,4-6        two groups under one source
 ```
 
 ### Ordering and duplicates

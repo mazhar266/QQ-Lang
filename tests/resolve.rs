@@ -100,6 +100,84 @@ fn multiple_references_resolve_in_order() {
     assert_eq!(pairs, [(2, 1), (2, 2), (2, 3), (2, 255), (1, 1)]);
 }
 
+/// `q:1:2,3,2:3,4-6` resolves as two groups: Surah 1 ayat 2,3 then Surah 2
+/// ayat 3,4,5,6.
+#[test]
+fn grouped_references_resolve_in_written_order() {
+    let mut ctx = ctx!();
+    let pairs: Vec<_> = ctx
+        .execute("q:1:2,3,2:3,4-6")
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r.extra["surah"].as_u64().unwrap(),
+                r.extra["ayah"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(pairs, [(1, 2), (1, 3), (2, 3), (2, 4), (2, 5), (2, 6)]);
+}
+
+/// A query with no source code is the Quran.
+#[test]
+fn an_omitted_source_means_the_quran() {
+    let mut ctx = ctx!();
+
+    // A bare number is a whole Surah.
+    assert_eq!(ctx.execute("1").unwrap().len(), 7);
+    assert_eq!(ctx.execute("1").unwrap()[0].source, "Q");
+
+    // Identical to spelling the source out.
+    assert_eq!(
+        ctx.execute("2:255").unwrap()[0].ar,
+        ctx.execute("Q:2:255").unwrap()[0].ar
+    );
+
+    let pairs: Vec<_> = ctx
+        .execute("1,2:255")
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r.extra["surah"].as_u64().unwrap(),
+                r.extra["ayah"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(pairs.len(), 8);
+    assert_eq!(pairs[0], (1, 1));
+    assert_eq!(pairs[7], (2, 255));
+
+    // Semantic errors still come from the Quran resolver.
+    assert_eq!(
+        ctx.execute("115").unwrap_err().code(),
+        "QQL_REFERENCE_NOT_FOUND"
+    );
+}
+
+/// `;` is only needed to switch source, and the last one may be dropped.
+#[test]
+fn the_semicolon_is_only_needed_between_sources() {
+    let mut ctx = ctx!();
+
+    assert_eq!(
+        ctx.execute("Q:1,2:255").unwrap().len(),
+        ctx.execute("Q:1;Q:2:255").unwrap().len()
+    );
+
+    let mixed = ctx.execute("1:1;b:1:1").unwrap();
+    assert_eq!(mixed.len(), 2);
+    assert_eq!(mixed[0].source, "Q");
+    assert_eq!(mixed[1].source, "B");
+
+    assert_eq!(
+        ctx.execute("q:1;b:1:1").unwrap().len(),
+        ctx.execute("q:1;b:1:1;").unwrap().len()
+    );
+}
+
 #[test]
 fn boundaries() {
     let mut ctx = ctx!();

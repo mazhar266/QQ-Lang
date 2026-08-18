@@ -5,7 +5,29 @@
 //!
 //! Knows the grammar and nothing else. It has no table of Surah counts and no
 //! match on source codes — `Q:500:999` and `XYZ:1:2` both parse cleanly and
-//! are rejected later, by the resolver and the registry respectively.
+//! are rejected later, by the resolver and the registry respectively. It does
+//! not even know which source is the default; it records that the code was
+//! omitted and lets the registry decide.
+//!
+//! ```text
+//! query     := reference (';' reference)* ';'?
+//! reference := (source ':')? body
+//! body      := ':' selector              // B::100, book-wide numbering
+//!            | group (',' group)*
+//! group     := primary (':' selector)?
+//! selector  := item (',' item)*
+//! item      := integer | integer '-' integer
+//! ```
+//!
+//! One rule resolves the only ambiguity: **an integer followed by `:` starts a
+//! new group** rather than continuing the current selector. So in
+//! `Q:1:2,3,2:3,4-6` the third `2` is a Surah, not an ayah, and the query
+//! yields two references. The same rule makes a bare `1,2:255` read as "all of
+//! 1, then 2:255".
+//!
+//! A `reference` can therefore produce several [`Reference`] nodes. They are
+//! appended in written order, so nothing downstream needs to know that the
+//! grouping syntax exists.
 
 use crate::ast::{Query, Range, Reference};
 use crate::error::Error;
@@ -32,6 +54,12 @@ impl<'a> Parser<'a> {
         self.tokens[self.index]
     }
 
+    /// Look `offset` tokens ahead, saturating at the trailing `Eof`.
+    fn peek_at(&self, offset: usize) -> Token<'a> {
+        let last = self.tokens.len() - 1;
+        self.tokens[(self.index + offset).min(last)]
+    }
+
     fn advance(&mut self) -> Token<'a> {
         let token = self.tokens[self.index];
         if token.kind != Kind::Eof {
@@ -54,7 +82,7 @@ impl<'a> Parser<'a> {
         let mut references = Vec::new();
 
         loop {
-            references.push(self.reference()?);
+            references.extend(self.reference()?);
 
             if !self.eat(Kind::Semicolon) {
                 break;
@@ -74,60 +102,82 @@ impl<'a> Parser<'a> {
         Ok(Query { references })
     }
 
-    /// ```text
-    /// reference := source ':' primary (':' selector)?
-    ///            | source ':' ':' selector
-    /// ```
-    ///
-    /// The second form skips the primary — `B::100`. It requires both the
-    /// colon and a selector, so `Q:` and `Q::` stay the errors they were
-    /// rather than quietly becoming "the entire collection".
-    fn reference(&mut self) -> Result<Reference, Error> {
+    /// One source's worth of groups. `;` is only needed to change source.
+    fn reference(&mut self) -> Result<Vec<Reference>, Error> {
         let token = self.peek();
-        if token.kind != Kind::Ident {
+        if token.kind != Kind::Ident && token.kind != Kind::Integer {
             return Err(Error::ExpectedSource {
                 position: token.position,
             });
         }
-        let source = self.advance().text.to_ascii_uppercase();
 
-        let token = self.peek();
-        if !self.eat(Kind::Colon) {
-            return Err(Error::ExpectedColon {
-                position: token.position,
-            });
-        }
+        // An omitted source is recorded as `None`, not filled in here — which
+        // source that means belongs to the registry.
+        let source = if token.kind == Kind::Ident {
+            let code = self.advance().text.to_ascii_uppercase();
+            let token = self.peek();
+            if !self.eat(Kind::Colon) {
+                return Err(Error::ExpectedColon {
+                    position: token.position,
+                });
+            }
+            Some(code)
+        } else {
+            None
+        };
 
-        if self.eat(Kind::Colon) {
-            return Ok(Reference {
-                source,
+        let mut references = Vec::new();
+
+        // `B::100` — a second colon skips the primary. It needs an explicit
+        // source, so `Q:` and `Q::` stay the errors they were rather than
+        // quietly becoming "the entire collection".
+        if source.is_some() && self.eat(Kind::Colon) {
+            references.push(Reference {
+                source: source.clone(),
                 primary: None,
                 ranges: self.selector()?,
             });
+            if !self.eat(Kind::Comma) {
+                return Ok(references);
+            }
         }
 
-        let primary = Some(self.integer()?);
+        loop {
+            let primary = Some(self.integer()?);
+            let ranges = if self.eat(Kind::Colon) {
+                self.selector()?
+            } else {
+                Vec::new()
+            };
 
-        let ranges = if self.eat(Kind::Colon) {
-            self.selector()?
-        } else {
-            Vec::new()
-        };
+            references.push(Reference {
+                source: source.clone(),
+                primary,
+                ranges,
+            });
 
-        Ok(Reference {
-            source,
-            primary,
-            ranges,
-        })
+            if !self.eat(Kind::Comma) {
+                break;
+            }
+        }
+
+        Ok(references)
     }
 
-    /// `selector := item (',' item)*`
+    /// `selector := item (',' item)*`, stopping before the next group.
     fn selector(&mut self) -> Result<Vec<Range>, Error> {
         let mut ranges = vec![self.item()?];
-        while self.eat(Kind::Comma) {
+        while self.peek().kind == Kind::Comma && !self.group_follows() {
+            self.advance();
             ranges.push(self.item()?);
         }
         Ok(ranges)
+    }
+
+    /// Past the comma at the cursor, does `integer ':'` follow? That integer
+    /// is the next group's primary, so the selector ends here.
+    fn group_follows(&self) -> bool {
+        self.peek_at(1).kind == Kind::Integer && self.peek_at(2).kind == Kind::Colon
     }
 
     /// `item := integer | integer '-' integer`

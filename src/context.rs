@@ -3,7 +3,7 @@
 
 //! Execution context: registry plus data cache.
 
-use crate::ast::Query;
+use crate::ast::{Query, Reference};
 use crate::error::Error;
 use crate::record::Record;
 use crate::registry::Registry;
@@ -106,12 +106,30 @@ impl Context {
         let mut records = Vec::new();
 
         for reference in &parsed.references {
-            let source =
-                self.registry
-                    .get(&reference.source)
-                    .ok_or_else(|| Error::UnknownSource {
-                        code: reference.source.clone(),
-                    })?;
+            // A query may omit the source — `1,2:255`. Substitute the
+            // registry's default here so every resolver sees a concrete code
+            // and the parser never has to know one.
+            let code = match &reference.source {
+                Some(code) => code.clone(),
+                None => self.registry.default_code().to_string(),
+            };
+
+            let source = self
+                .registry
+                .get(&code)
+                .ok_or_else(|| Error::UnknownSource { code: code.clone() })?;
+
+            let concrete;
+            let reference = if reference.source.is_some() {
+                reference
+            } else {
+                concrete = Reference {
+                    source: Some(code),
+                    ..reference.clone()
+                };
+                &concrete
+            };
+
             source.resolve(&mut self.repo, reference, &mut records)?;
         }
 

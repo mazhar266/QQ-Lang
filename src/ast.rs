@@ -23,7 +23,12 @@ pub struct Range {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Reference {
     /// Source code, normalized to uppercase.
-    pub source: String,
+    ///
+    /// `None` when the query omitted it — `1,2:255` rather than `Q:1,2:255`.
+    /// Which source that means is the registry's decision, not the parser's;
+    /// [`Context`](crate::Context) substitutes the default before resolving,
+    /// so source handlers always see a concrete code.
+    pub source: Option<String>,
     /// First-level index — Surah for Quran, chapter for Hadith.
     ///
     /// `None` is the flat form `B::100`, where the primary is skipped and the
@@ -54,9 +59,10 @@ impl Reference {
 
     /// `"B:1"`, or `"B:"` when the primary is skipped. For error messages.
     pub fn label(&self) -> String {
+        let source = self.source.as_deref().unwrap_or_default();
         match self.primary {
-            Some(primary) => format!("{}:{primary}", self.source),
-            None => format!("{}:", self.source),
+            Some(primary) => format!("{source}:{primary}"),
+            None => format!("{source}:"),
         }
     }
 
@@ -102,7 +108,7 @@ mod tests {
 
     fn reference(ranges: &[(u32, u32)]) -> Reference {
         Reference {
-            source: "Q".into(),
+            source: Some("Q".into()),
             primary: Some(2),
             ranges: ranges
                 .iter()
