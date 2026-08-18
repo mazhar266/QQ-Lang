@@ -144,6 +144,21 @@ identifier   := [A-Za-z][A-Za-z0-9_]*
 integer      := [0-9]+
 ```
 
+> **As built:** the grammar grew three conveniences after v1, none of which
+> needed a source handler to change:
+>
+> - `reference := (source ':')? body` — the source is optional, and omitting
+>   it means the Quran. The parser records only the omission; `Registry`
+>   owns the default code and `Context` substitutes it before resolving.
+> - `body := group (',' group)*` with `group := primary (':' selector)?` — one
+>   source can address several chapters, as in `q:1:2,3,2:3,4-6`. The rule that
+>   makes it unambiguous is that an integer followed by `:` is a primary, not a
+>   selector item, decided by one token of lookahead.
+> - `body := ':' selector` — `B::100`, book-wide numbering (§22).
+>
+> `;` therefore separates *sources* rather than references, since commas
+> already join groups under one source.
+
 Examples:
 
 ```text
