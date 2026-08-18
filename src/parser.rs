@@ -25,6 +25,12 @@
 //! yields two references. The same rule makes a bare `1,2:255` read as "all of
 //! 1, then 2:255".
 //!
+//! A stated source carries forward to later references in the same query, so
+//! `b:1:1;3` is Bukhari twice and `b:1:1;q:3` switches to the Quran. This is
+//! still pure syntax — "reuse the previous code" needs no idea what the codes
+//! mean. A reference with no code stated anywhere before it stays `None`, and
+//! the registry supplies the default.
+//!
 //! A `reference` can therefore produce several [`Reference`] nodes. They are
 //! appended in written order, so nothing downstream needs to know that the
 //! grouping syntax exists.
@@ -80,9 +86,11 @@ impl<'a> Parser<'a> {
     /// `query := reference (';' reference)* ';'?`
     fn query(&mut self) -> Result<Query, Error> {
         let mut references = Vec::new();
+        // The most recent source stated in this query, carried forward.
+        let mut inherited: Option<String> = None;
 
         loop {
-            references.extend(self.reference()?);
+            references.extend(self.reference(&mut inherited)?);
 
             if !self.eat(Kind::Semicolon) {
                 break;
@@ -103,7 +111,10 @@ impl<'a> Parser<'a> {
     }
 
     /// One source's worth of groups. `;` is only needed to change source.
-    fn reference(&mut self) -> Result<Vec<Reference>, Error> {
+    ///
+    /// `inherited` carries the last stated code forward and is updated when
+    /// this reference states one of its own.
+    fn reference(&mut self, inherited: &mut Option<String>) -> Result<Vec<Reference>, Error> {
         let token = self.peek();
         if token.kind != Kind::Ident && token.kind != Kind::Integer {
             return Err(Error::ExpectedSource {
@@ -111,9 +122,11 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // An omitted source is recorded as `None`, not filled in here — which
-        // source that means belongs to the registry.
-        let source = if token.kind == Kind::Ident {
+        // A source stated here becomes the one later references inherit. If
+        // none was ever stated, this stays `None` — which source that means
+        // belongs to the registry, not here.
+        let explicit = token.kind == Kind::Ident;
+        let source = if explicit {
             let code = self.advance().text.to_ascii_uppercase();
             let token = self.peek();
             if !self.eat(Kind::Colon) {
@@ -121,17 +134,18 @@ impl<'a> Parser<'a> {
                     position: token.position,
                 });
             }
+            *inherited = Some(code.clone());
             Some(code)
         } else {
-            None
+            inherited.clone()
         };
 
         let mut references = Vec::new();
 
-        // `B::100` — a second colon skips the primary. It needs an explicit
-        // source, so `Q:` and `Q::` stay the errors they were rather than
-        // quietly becoming "the entire collection".
-        if source.is_some() && self.eat(Kind::Colon) {
+        // `B::100` — a second colon skips the primary. Only a source written
+        // right here can be followed by that colon, so `Q:` and `Q::` stay the
+        // errors they were rather than quietly becoming "the whole collection".
+        if explicit && self.eat(Kind::Colon) {
             references.push(Reference {
                 source: source.clone(),
                 primary: None,

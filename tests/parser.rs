@@ -151,10 +151,24 @@ fn a_reference_can_carry_several_groups() {
     );
 
     // A range is never a primary, so the trailing `:` here is a syntax error
-    // rather than a silently different reading.
+    // rather than a silently different reading. The two things it might have
+    // meant are both writable, and both mean something different:
     assert_eq!(
         parse("Q:1:1-5:3").unwrap_err().code(),
         "QQL_INVALID_CHARACTER"
+    );
+    // `;3` — Surah 3, a new reference inheriting the stated `Q`.
+    assert_eq!(
+        refs("Q:1:1-5;3"),
+        [
+            ("Q".into(), Some(1), vec![(1, 5)]),
+            ("Q".into(), Some(3), vec![]),
+        ]
+    );
+    // `,3` — ayah 3 of the same Surah, which the dedup pass then folds away.
+    assert_eq!(
+        refs("Q:1:1-5,3"),
+        [("Q".into(), Some(1), vec![(1, 5), (3, 3)])]
     );
 }
 
@@ -192,6 +206,37 @@ fn the_source_may_be_omitted() {
             ("B".into(), Some(1), vec![(1, 1)]),
         ]
     );
+
+    // A stated source carries forward; only another code changes it.
+    assert_eq!(
+        refs("b:1:1;3"),
+        [
+            ("B".into(), Some(1), vec![(1, 1)]),
+            ("B".into(), Some(3), vec![]),
+        ]
+    );
+    assert_eq!(
+        refs("b:1:1;q:3"),
+        [
+            ("B".into(), Some(1), vec![(1, 1)]),
+            ("Q".into(), Some(3), vec![]),
+        ]
+    );
+    assert_eq!(
+        refs("b:1:1;3;q:1;2"),
+        [
+            ("B".into(), Some(1), vec![(1, 1)]),
+            ("B".into(), Some(3), vec![]),
+            ("Q".into(), Some(1), vec![]),
+            ("Q".into(), Some(2), vec![]),
+        ]
+    );
+
+    // Inheritance never turns a bare number into the flat `::` form.
+    assert_eq!(refs("b::100;3"), [
+        ("B".into(), None, vec![(100, 100)]),
+        ("B".into(), Some(3), vec![]),
+    ]);
 
     assert_eq!(refs(" 1 , 2 : 255 "), refs("1,2:255"));
 }

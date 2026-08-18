@@ -147,9 +147,11 @@ integer      := [0-9]+
 > **As built:** the grammar grew three conveniences after v1, none of which
 > needed a source handler to change:
 >
-> - `reference := (source ':')? body` — the source is optional, and omitting
->   it means the Quran. The parser records only the omission; `Registry`
->   owns the default code and `Context` substitutes it before resolving.
+> - `reference := (source ':')? body` — the source is optional. A stated code
+>   carries forward to later references in the same query, so `b:1:1;3` is
+>   Bukhari twice; only when no code appears anywhere earlier does the Quran
+>   default apply. The parser does the carry-forward (pure syntax) while
+>   `Registry` owns the default code and `Context` substitutes it.
 > - `body := group (',' group)*` with `group := primary (':' selector)?` — one
 >   source can address several chapters, as in `q:1:2,3,2:3,4-6`. The rule that
 >   makes it unambiguous is that an integer followed by `:` is a primary, not a

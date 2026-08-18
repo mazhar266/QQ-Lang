@@ -178,6 +178,74 @@ fn the_semicolon_is_only_needed_between_sources() {
     );
 }
 
+/// `Q:1:1-5:3` is rejected. Spelling out what it might have meant gives two
+/// different, both-valid queries — this pins them apart.
+#[test]
+fn a_range_cannot_be_followed_by_a_group_colon() {
+    let mut ctx = ctx!();
+
+    assert_eq!(
+        ctx.execute("q:1:1-5:3").unwrap_err().code(),
+        "QQL_INVALID_CHARACTER"
+    );
+
+    // `;3` starts a new reference: Surah 3, whole.
+    let semicolon = ctx.execute("q:1:1-5;3").unwrap();
+    assert_eq!(semicolon.len(), 5 + 200);
+    assert_eq!(semicolon[5].extra["surah"], 3);
+
+    // `,3` is ayah 3 of the same Surah — already inside 1-5, so dedup drops it.
+    let comma: Vec<_> = ctx
+        .execute("q:1:1-5,3")
+        .unwrap()
+        .iter()
+        .map(|r| r.extra["ayah"].as_u64().unwrap())
+        .collect();
+    assert_eq!(comma, [1, 2, 3, 4, 5]);
+
+    // Outside the range it is kept, in written order.
+    let comma: Vec<_> = ctx
+        .execute("q:1:1-2,7")
+        .unwrap()
+        .iter()
+        .map(|r| r.extra["ayah"].as_u64().unwrap())
+        .collect();
+    assert_eq!(comma, [1, 2, 7]);
+}
+
+/// A stated source carries forward: once a line says `B`, everything after it
+/// is Bukhari until another code says otherwise.
+#[test]
+fn a_stated_source_carries_forward_across_semicolons() {
+    let mut ctx = ctx!();
+
+    let records = ctx.execute("b:1:1;3").unwrap();
+    assert!(records.iter().all(|r| r.source == "B"));
+    assert_eq!(records[0].extra["chapter"], 1);
+    assert_eq!(records[1].extra["chapter"], 3);
+    // Chapter 3 of Bukhari, not Surah 3 — 76 hadiths, not 200 ayat.
+    assert_eq!(records.len(), 1 + 76);
+
+    // An explicit code switches back.
+    let switched = ctx.execute("b:1:1;q:3").unwrap();
+    assert_eq!(switched[0].source, "B");
+    assert_eq!(switched[1].source, "Q");
+    assert_eq!(switched[1].extra["surah"], 3);
+    assert_eq!(switched.len(), 1 + 200);
+
+    // The switch is sticky too.
+    let back = ctx.execute("b:1:1;q:1:1;2:255").unwrap();
+    assert_eq!(back[0].source, "B");
+    assert_eq!(back[1].source, "Q");
+    assert_eq!(back[2].source, "Q");
+    assert_eq!(back[2].extra["ayah"], 255);
+
+    // Only a code stated *earlier* is inherited; with none, the default holds.
+    let leading = ctx.execute("1:1;b:1:1").unwrap();
+    assert_eq!(leading[0].source, "Q");
+    assert_eq!(leading[1].source, "B");
+}
+
 #[test]
 fn boundaries() {
     let mut ctx = ctx!();

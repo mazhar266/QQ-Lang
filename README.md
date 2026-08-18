@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 79 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 82 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -32,7 +32,7 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | **selector** | Optional list of items within the primary. Omit it to select everything. |
 | `-` | Inclusive range: `1-5` → 1, 2, 3, 4, 5 |
 | `,` | Joins items, and joins groups: `1:2,3,2:5` |
-| `;` | Separates sources. Only needed to switch collection; a trailing one is optional. |
+| `;` | Separates references. Only needed to switch collection or start a new primary; a trailing one is optional. |
 | `::` | Skips the primary: `B::100` numbers across the whole collection. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
@@ -53,7 +53,12 @@ Q:1,2,3          three whole Surahs
 B:1:1,2:5        Bukhari chapter 1 hadith 1, then chapter 2 hadith 5
 ```
 
-A range is never a primary, so `Q:1:1-5:3` is a syntax error rather than a second reading.
+A range is never a primary, so `Q:1:1-5:3` is a syntax error rather than a second reading. Both things it could have meant are writable, and they differ:
+
+```text
+Q:1:1-5;3     Surah 1 ayat 1–5, then all of Surah 3
+Q:1:1-5,3     Surah 1 ayat 1–5, plus ayah 3 (already in the range, so deduped)
+```
 
 ### Omitting the source
 
@@ -73,7 +78,19 @@ Leave the code out and the query is Quran:
 q:1;b:1          same as q:1;b:1;
 ```
 
-The parser does not know that `Q` is the default — it records that the code was omitted, and the registry substitutes `Q` when resolving.
+### A stated source carries forward
+
+Once a query names a collection, everything after it belongs to that collection until another code says otherwise:
+
+```text
+b:1:1;3          Bukhari 1:1, then Bukhari chapter 3
+b:1:1;q:3        Bukhari 1:1, then Surah 3
+b:1:1;3;q:1;2    Bukhari 1:1 and 3, then Surah 1 and Surah 2
+```
+
+The Quran default applies only when nothing has been named yet — `1,2:255` and the leading `1:1` in `1:1;b:1:1`.
+
+The parser handles the carry-forward, which stays pure syntax: "reuse the previous code" needs no idea what the codes mean. It never learns that `Q` is the default either — it records that no code was stated, and the registry substitutes one when resolving.
 
 ### Source codes
 
@@ -129,6 +146,8 @@ Q::1-7;B::1;           flat form mixes freely with the rest
 1                      no source code — the whole of Surah 1
 1,2:255                all of Surah 1, then Surah 2 ayah 255
 q:1:2,3,2:3,4-6        two groups under one source
+b:1:1;3                the source carries forward — Bukhari twice
+b:1:1;q:3              …until another code switches it
 ```
 
 ### Ordering and duplicates
