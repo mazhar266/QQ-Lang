@@ -462,14 +462,44 @@ git submodule update --init
 
 ```text
 sources/
-  quran-json-arabic/dist/chapters/en/{1..114}.json     Arabic + English, one file per Surah
+  quran/chapters/{1..114}.json                         generated — see below
+  quran/verses/{1..6236}.json                          generated — mushaf order
   hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json
   Hisn-Muslim-Json/husn_en.json                        all 132 chapters in one file
 ```
 
+### The Quran directory is generated, not vendored
+
+`sources/quran/` is built by [scripts/build-quran.py](scripts/build-quran.py) and committed:
+
+```bash
+python3 scripts/build-quran.py            # fetch Tanzil, rebuild
+python3 scripts/build-quran.py --check    # verify only, write nothing
+```
+
+The Arabic comes from **Tanzil's Uthmani text**; names, the English translation and
+the per-ayah transliteration still come from the `quran-json-arabic` submodule.
+
+The split exists because that submodule spells three marks with codepoints that mean
+something else in Unicode — `U+0657 INVERTED DAMMA` for an open fathatan, `U+065E` for
+a dammatan, `U+0656` for a kasratan. A font that follows Unicode draws them literally,
+so 2:286's `إِصْرًا` gains a damma above the reh and reads *isru* rather than *isran*.
+Tanzil uses the standard marks and carries the pause, sajdah and silence signs the
+submodule omits.
+
+The generator refuses to write unless the two texts agree: same ayah counts per surah,
+no misused codepoint in the output, the basmalah stripped from exactly the 112 surahs
+that carry it, and the consonant skeletons matching except for the handful of ayat
+where the two disagree about hamza spelling (`ئ` versus `ي` plus a combining hamza).
+
+`quran/verses/` carries only the English translation. The submodule ships ten languages
+per ayah, which made the equivalent directory 14 MB rather than 2.6 MB, and QQL reads
+only the one.
+
 Files are read on first use and cached in the `Context` until it drops — `Q:2:255` loads roughly 50 KB, not the whole mushaf. There is no eviction policy.
 
-The datasets carry their own licenses; see the submodule directories.
+The datasets carry their own licenses; see the submodule directories, and
+`sources/quran/TANZIL-LICENSE.txt` for the Quran text.
 
 Upstream data is taken as authoritative and is never rewritten, but it is not uniform. The Hisnul Muslim file in particular carries a UTF-8 BOM, stores its chapters out of numerical order, repeats a key in two entries, and misspells one field name. Those are absorbed where they belong — the BOM in [src/repo.rs](src/repo.rs) since it is a storage concern, the rest in [src/sources/hisnul.rs](src/sources/hisnul.rs) — rather than by patching the data.
 

@@ -477,8 +477,7 @@ fn arabic_survives_the_round_trip_byte_for_byte() {
     let mut ctx = ctx!();
 
     let expected = {
-        let raw =
-            std::fs::read_to_string("sources/quran-json-arabic/dist/chapters/en/1.json").unwrap();
+        let raw = std::fs::read_to_string("sources/quran/chapters/1.json").unwrap();
         let file: Value = serde_json::from_str(&raw).unwrap();
         file["verses"][0]["text"].as_str().unwrap().to_string()
     };
@@ -490,6 +489,40 @@ fn arabic_survives_the_round_trip_byte_for_byte() {
     assert_eq!(got, expected);
     assert_eq!(got.as_bytes(), expected.as_bytes());
     assert!(!got.contains('\u{fffd}'), "replacement character in output");
+}
+
+/// The submodule spells three marks with codepoints that mean something else
+/// in Unicode — U+0657 INVERTED DAMMA for an open fathatan, U+065E for a
+/// dammatan, U+0656 for a kasratan — so a font that follows Unicode draws a
+/// damma where a fathatan belongs and 2:286 reads *isru* rather than *isran*.
+/// `scripts/build-quran.py` takes the Arabic from Tanzil instead; this makes
+/// sure a regenerated dataset never reintroduces them.
+#[test]
+fn quran_text_uses_standard_marks_only() {
+    let mut ctx = ctx!();
+
+    let json = ctx.execute_json("Q:1;Q:2;Q:112;Q:2:286");
+    let value: Value = serde_json::from_str(&json).unwrap();
+    let results = value["results"].as_array().unwrap();
+    assert!(!results.is_empty());
+
+    for record in results {
+        let ar = record["ar"].as_str().unwrap();
+        for bad in ['\u{0656}', '\u{0657}', '\u{065E}'] {
+            assert!(
+                !ar.contains(bad),
+                "U+{:04X} in {}: {ar}",
+                bad as u32,
+                record["surah"]
+            );
+        }
+    }
+
+    // The reported case, spelled out: reh + fathatan, not reh + inverted damma.
+    let json = ctx.execute_json("Q:2:286");
+    let value: Value = serde_json::from_str(&json).unwrap();
+    let ar = value["results"][0]["ar"].as_str().unwrap();
+    assert!(ar.contains('\u{064B}'), "2:286 should carry a fathatan");
 }
 
 #[test]
