@@ -52,9 +52,11 @@ mod record;
 mod registry;
 mod repo;
 mod search;
+#[cfg(feature = "vector")]
+pub mod vector;
 mod sources;
 
-pub use ast::{Query, Range, Reference};
+pub use ast::{MatchKind, Query, Range, Reference, Search};
 pub use context::Context;
 pub use error::Error;
 pub use parser::parse;

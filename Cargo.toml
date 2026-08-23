@@ -15,6 +15,12 @@ categories = ["parser-implementations", "text-processing"]
 # for the C ABI in src/ffi.rs.
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[features]
+default = []
+# Vector similarity search: the `` `term` `` form. Off by default so the core
+# stays two dependencies and no vector assets are needed to build or run.
+vector = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

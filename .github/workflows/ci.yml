@@ -37,6 +37,29 @@ jobs:
       - name: C ABI smoke test
         run: ./scripts/c-smoke.sh
 
+  vector:
+    name: Vector search (feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # The index is generated, not committed.
+      - name: Build vector indexes
+        run: python3 scripts/build-vectors.py --source Q
+
+      - name: Clippy
+        run: cargo clippy --features vector --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --features vector
+
   dart:
     name: Dart binding
     runs-on: ubuntu-latest

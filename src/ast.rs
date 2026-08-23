@@ -39,12 +39,38 @@ pub struct Reference {
     ///
     /// For a search this is the `3~5` scope rather than a selection.
     pub ranges: Vec<Range>,
-    /// Search term, for `Q:1:"text"`. `None` is an ordinary reference.
+    /// Search, for `Q:1:"text"` or ``Q:1:`text` ``. `None` is an ordinary
+    /// reference.
     ///
     /// When set, `primary` and `ranges` narrow *where* to search rather than
     /// what to return: `None`/empty mean the whole collection.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
+    pub search: Option<Search>,
+}
+
+/// How a search term is matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MatchKind {
+    /// `"term"` or `'term'` — folded substring, exact and positional.
+    Exact,
+    /// `` `term` `` — vector similarity, ranked by score.
+    ///
+    /// Needs the `vector` feature and a built index; without either, the query
+    /// is refused rather than silently downgraded to [`MatchKind::Exact`].
+    Similar,
+}
+
+/// A search term plus how to match it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Search {
+    /// The term as written, without its quotes.
+    pub term: String,
+    /// Substring or similarity.
+    pub kind: MatchKind,
+    /// Cap on results, from a trailing `~N`. Only similarity ranks, so only
+    /// similarity has a default; an exact search returns every match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
 }
 
 /// A whole query: one or more references, in the order written.
@@ -65,12 +91,12 @@ impl Reference {
     /// A search with no Surah scope also leaves `primary` empty, but it is not
     /// book-wide numbering, so it does not count.
     pub fn is_flat(&self) -> bool {
-        self.primary.is_none() && self.text.is_none()
+        self.primary.is_none() && self.search.is_none()
     }
 
     /// Whether this is a search rather than a reference.
     pub fn is_search(&self) -> bool {
-        self.text.is_some()
+        self.search.is_some()
     }
 
     /// `"B:1"`, or `"B:"` when the primary is skipped. For error messages.
@@ -126,7 +152,7 @@ mod tests {
         Reference {
             source: Some("Q".into()),
             primary: Some(2),
-            text: None,
+            search: None,
             ranges: ranges
                 .iter()
                 .map(|&(from, to)| Range { from, to })

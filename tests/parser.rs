@@ -271,7 +271,7 @@ fn search_terms_parse_as_scoped_references() {
             r.source.clone().unwrap_or_default(),
             r.primary,
             r.ranges.iter().map(|g| (g.from, g.to)).collect(),
-            r.text.clone().unwrap(),
+            r.search.clone().unwrap().term,
         )
     }
 
@@ -318,7 +318,7 @@ fn search_terms_parse_as_scoped_references() {
     assert_eq!(mixed.len(), 2);
     assert!(!mixed[0].is_search());
     assert_eq!(mixed[1].source.as_deref(), Some("B"));
-    assert_eq!(mixed[1].text.as_deref(), Some("text"));
+    assert_eq!(mixed[1].search.as_ref().unwrap().term, "text");
 }
 
 /// Each invalid query pins both the variant and the reported offset.

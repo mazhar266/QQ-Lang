@@ -108,7 +108,7 @@ fn main() -> ExitCode {
                     "ranges": r.ranges.iter()
                         .map(|range| [range.from, range.to])
                         .collect::<Vec<_>>(),
-                    "search": r.text,
+                    "search": r.search,
                 })).collect::<Vec<_>>(),
             }),
             Err(e) => e.to_json(&query),

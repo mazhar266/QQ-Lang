@@ -90,4 +90,41 @@ impl Repository {
         self.cache.insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
         Ok(value)
     }
+
+    /// Load a binary file, building the cached value with `build`.
+    ///
+    /// The JSON path in [`Repository::load`] cannot serve binary assets — it
+    /// decodes UTF-8 and strips a BOM, both wrong for a vector index. This
+    /// keeps the same cache and the same lazy-load contract, and leaves the
+    /// bytes untouched.
+    pub fn load_bytes_with<T, F>(&mut self, relative: impl AsRef<Path>, build: F) -> Result<Arc<T>, Error>
+    where
+        T: Send + Sync + 'static,
+        F: FnOnce(&[u8]) -> Result<T, Error>,
+    {
+        let path = self.root.join(relative);
+
+        if let Some(cached) = self.cache.get(&path) {
+            return Arc::clone(cached)
+                .downcast::<T>()
+                .map_err(|_| Error::Internal {
+                    detail: format!("cached {} under a different type", path.display()),
+                });
+        }
+
+        let bytes = std::fs::read(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::DataFileNotFound {
+                path: path.display().to_string(),
+            },
+            _ => Error::InvalidDataFile {
+                path: path.display().to_string(),
+                detail: e.to_string(),
+            },
+        })?;
+
+        let value: Arc<T> = Arc::new(build(&bytes)?);
+        self.cache
+            .insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
+        Ok(value)
+    }
 }

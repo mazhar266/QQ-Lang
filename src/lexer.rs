@@ -28,6 +28,9 @@ pub enum Kind {
     /// A quoted search term, written with `"` or `'`. `text` is the content,
     /// without the quotes.
     Text,
+    /// A backtick-quoted term, which asks for similarity rather than an exact
+    /// match. `text` is the content, without the backticks.
+    Similar,
     /// End of input.
     Eof,
 }
@@ -69,7 +72,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
         //
         // Both quotes are ASCII and so cannot occur inside a multi-byte
         // sequence, making this byte scan safe for any UTF-8 content.
-        if b == b'"' || b == b'\'' {
+        if b == b'"' || b == b'\'' || b == b'`' {
             let quote = b;
             let open = i;
             i += 1;
@@ -80,7 +83,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
                 return Err(Error::UnterminatedText { position: open });
             }
             tokens.push(Token {
-                kind: Kind::Text,
+                kind: if quote == b'`' { Kind::Similar } else { Kind::Text },
                 text: &input[open + 1..i],
                 position: open,
             });

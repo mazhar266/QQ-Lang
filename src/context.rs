@@ -3,7 +3,7 @@
 
 //! Execution context: registry plus data cache.
 
-use crate::ast::{Query, Range, Reference};
+use crate::ast::{MatchKind, Query, Range, Reference};
 use crate::error::Error;
 use crate::record::Record;
 use crate::registry::Registry;
@@ -130,13 +130,121 @@ impl Context {
                 &concrete
             };
 
-            match &reference.text {
-                Some(needle) => Self::search(&mut self.repo, source, reference, needle, &mut records)?,
+            match &reference.search {
+                Some(search) => match search.kind {
+                    MatchKind::Exact => {
+                        Self::exact(&mut self.repo, source, reference, &search.term, &mut records)?
+                    }
+                    MatchKind::Similar => {
+                        Self::similar(&mut self.repo, source, reference, search, &mut records)?
+                    }
+                },
                 None => source.resolve(&mut self.repo, reference, &mut records)?,
             }
         }
 
         Ok(records)
+    }
+
+    /// Resolve a similarity search — the `` `term` `` form.
+    ///
+    /// Without the `vector` feature this refuses the query outright. Falling
+    /// back to substring matching would answer a different question than the
+    /// one asked, which is worse than saying no.
+    #[cfg(not(feature = "vector"))]
+    fn similar(
+        _repo: &mut Repository,
+        source: &dyn crate::Source,
+        _reference: &Reference,
+        _search: &crate::ast::Search,
+        _out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        Err(Error::Unsupported {
+            detail: format!(
+                "similarity search needs the `vector` feature; {}:\"...\" does substring matching instead",
+                source.code()
+            ),
+        })
+    }
+
+    /// Resolve a similarity search against the source's vector index.
+    ///
+    /// The index is addressed by `(primary, number)`, so the scope filters
+    /// during the scan and every hit is resolved back through the ordinary
+    /// reference path — the ranked list decides *which* records, never what
+    /// they look like.
+    #[cfg(feature = "vector")]
+    fn similar(
+        repo: &mut Repository,
+        source: &dyn crate::Source,
+        reference: &Reference,
+        search: &crate::ast::Search,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        use crate::vector::{Index, DEFAULT_LIMIT};
+
+        let path = format!("vectors/{}.qv", source.code());
+        let index: Arc<Index> = match repo.load_bytes_with(&path, |bytes| Index::parse(&path, bytes))
+        {
+            Ok(index) => index,
+            Err(Error::DataFileNotFound { .. }) => {
+                return Err(Error::Unsupported {
+                    detail: format!(
+                        "no vector index for {}; build one with scripts/build-vectors.py (expected {path})",
+                        source.code()
+                    ),
+                })
+            }
+            Err(other) => return Err(other),
+        };
+
+        // Scope: `Q:1:` limits to one primary, `Q:1:3~5:` to a range in it.
+        let primary = reference.primary;
+        let ranges = reference.ranges.clone();
+        let accept = move |key: &crate::vector::Key| {
+            if let Some(primary) = primary {
+                if key.primary != primary {
+                    return false;
+                }
+            }
+            ranges.is_empty()
+                || ranges
+                    .iter()
+                    .any(|r| key.number >= r.from && key.number <= r.to)
+        };
+
+        let limit = search.limit.unwrap_or(DEFAULT_LIMIT);
+        let query = index.embed(&search.term);
+        let hits = index.nearest(&query, limit as usize, accept);
+
+        for (key, score) in hits {
+            let mut found = Vec::new();
+            source.resolve(
+                repo,
+                &Reference {
+                    source: reference.source.clone(),
+                    primary: Some(key.primary),
+                    ranges: vec![Range {
+                        from: key.number,
+                        to: key.number,
+                    }],
+                    search: None,
+                },
+                &mut found,
+            )?;
+
+            for mut record in found {
+                record
+                    .extra
+                    .insert("score".to_string(), score_value(score));
+                record
+                    .extra
+                    .insert("ranked".to_string(), serde_json::Value::Bool(true));
+                out.push(record);
+            }
+        }
+
+        Ok(())
     }
 
     /// Resolve a search's scope, then keep the records that match.
@@ -149,7 +257,7 @@ impl Context {
     /// The scan is linear over the resolved scope. At Quran and hadith sizes —
     /// 6236 ayat, 7277 hadiths — that is far cheaper than maintaining an
     /// index, and it can never fall out of step with the text.
-    fn search(
+    fn exact(
         repo: &mut Repository,
         source: &dyn crate::Source,
         reference: &Reference,
@@ -157,7 +265,7 @@ impl Context {
         out: &mut Vec<Record>,
     ) -> Result<(), Error> {
         let mut scope = Reference {
-            text: None,
+            search: None,
             ..reference.clone()
         };
 
@@ -211,4 +319,13 @@ impl Context {
                 .to_string()
         })
     }
+}
+
+/// Round a score to three decimals so responses are stable to compare.
+#[cfg(feature = "vector")]
+fn score_value(score: f32) -> serde_json::Value {
+    let rounded = (f64::from(score) * 1000.0).round() / 1000.0;
+    serde_json::Number::from_f64(rounded)
+        .map(serde_json::Value::Number)
+        .unwrap_or(serde_json::Value::Null)
 }

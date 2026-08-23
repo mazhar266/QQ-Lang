@@ -21,8 +21,11 @@
 //! scope     := integer '~' integer
 //! selector  := item (',' item)*
 //! item      := integer | integer '-' integer
-//! text      := '"' ... '"'
+//! text      := '"' ... '"' | "'" ... "'" | '`' ... '`'   ('~' integer)?
 //! ```
+//!
+//! Backticks ask for similarity instead of an exact match, and may carry a
+//! trailing `~N` cap: `` Q:1:`mercy`~5 ``.
 //!
 //! One rule resolves the only ambiguity: **an integer followed by `:` starts a
 //! new group** rather than continuing the current selector. So in
@@ -40,7 +43,7 @@
 //! appended in written order, so nothing downstream needs to know that the
 //! grouping syntax exists.
 
-use crate::ast::{Query, Range, Reference};
+use crate::ast::{MatchKind, Query, Range, Reference, Search};
 use crate::error::Error;
 use crate::lexer::{tokenize, Kind, Token};
 
@@ -150,7 +153,7 @@ impl<'a> Parser<'a> {
         let mut references = Vec::new();
 
         // `Q:"text"` — search the whole collection.
-        if self.peek().kind == Kind::Text {
+        if matches!(self.peek().kind, Kind::Text | Kind::Similar) {
             return Ok(vec![self.search(source, None, Vec::new())?]);
         }
 
@@ -162,7 +165,7 @@ impl<'a> Parser<'a> {
                 source: source.clone(),
                 primary: None,
                 ranges: self.selector()?,
-                text: None,
+                search: None,
             });
             if !self.eat(Kind::Comma) {
                 return Ok(references);
@@ -174,7 +177,7 @@ impl<'a> Parser<'a> {
 
             let ranges = if self.eat(Kind::Colon) {
                 // `Q:1:"text"` — search inside this primary.
-                if self.peek().kind == Kind::Text {
+                if matches!(self.peek().kind, Kind::Text | Kind::Similar) {
                     references.push(self.search(source, Some(primary), Vec::new())?);
                     break;
                 }
@@ -203,7 +206,7 @@ impl<'a> Parser<'a> {
                 source: source.clone(),
                 primary: Some(primary),
                 ranges,
-                text: None,
+                search: None,
             });
 
             if !self.eat(Kind::Comma) {
@@ -222,11 +225,15 @@ impl<'a> Parser<'a> {
         ranges: Vec<Range>,
     ) -> Result<Reference, Error> {
         let token = self.peek();
-        if token.kind != Kind::Text {
-            return Err(Error::ExpectedText {
-                position: token.position,
-            });
-        }
+        let kind = match token.kind {
+            Kind::Text => MatchKind::Exact,
+            Kind::Similar => MatchKind::Similar,
+            _ => {
+                return Err(Error::ExpectedText {
+                    position: token.position,
+                })
+            }
+        };
         self.advance();
 
         // An empty needle would match every record, which is never what
@@ -237,11 +244,29 @@ impl<'a> Parser<'a> {
             });
         }
 
+        // `~N` caps the results. Ranking is what makes a cap meaningful, so
+        // it is accepted only after a similarity term.
+        let limit = if self.peek().kind == Kind::Tilde {
+            if kind != MatchKind::Similar {
+                return Err(Error::InvalidCharacter {
+                    position: self.peek().position,
+                });
+            }
+            self.advance();
+            Some(self.integer()?)
+        } else {
+            None
+        };
+
         Ok(Reference {
             source,
             primary,
             ranges,
-            text: Some(token.text.to_string()),
+            search: Some(Search {
+                term: token.text.to_string(),
+                kind,
+                limit,
+            }),
         })
     }
 
