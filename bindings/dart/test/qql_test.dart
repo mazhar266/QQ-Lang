@@ -52,7 +52,7 @@ void main() {
     final ar = qql.execute('Q:1:1').first['ar'] as String;
 
     final file = jsonDecode(
-      File('$_data/quran-json-arabic/dist/chapters/en/1.json').readAsStringSync(),
+      File('$_data/quran/chapters/1.json').readAsStringSync(),
     ) as Map<String, dynamic>;
     final expected = (file['verses'] as List).first['text'] as String;
 

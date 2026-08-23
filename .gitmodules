@@ -1,6 +1,3 @@
-[submodule "sources/quran-json-arabic"]
-	path = sources/quran-json-arabic
-	url = git@github.com:asim/quran-json-arabic.git
 [submodule "sources/hadith-json"]
 	path = sources/hadith-json
 	url = git@github.com:AhmedBaset/hadith-json.git

@@ -3,8 +3,8 @@
 
 //! End-to-end tests against the real data in `sources/`.
 //!
-//! These need the git submodules checked out. If they are not, every test here
-//! is skipped rather than failing — a missing submodule is not a code defect.
+//! These need `sources/` populated — the git submodules checked out. If they are
+//! not, every test here is skipped rather than failing.
 
 use qql::Context;
 use serde_json::Value;
@@ -13,7 +13,7 @@ const DATA: &str = "sources";
 
 fn context() -> Option<Context> {
     std::path::Path::new(DATA)
-        .join("quran-json-arabic/dist/chapters/en/1.json")
+        .join("quran/chapters/1.json")
         .exists()
         .then(|| Context::new(DATA))
 }
@@ -437,6 +437,33 @@ fn flat_numbering_works_for_quran_and_hisnul_muslim() {
 
     assert_eq!(ctx.execute("Q::1").unwrap()[0].ar, ctx.execute("Q:1:1").unwrap()[0].ar);
     assert_eq!(ctx.execute("Q::6236").unwrap()[0].extra["surah"], 114);
+}
+
+/// `Q::N` is served by a 114-entry verse-count table plus the ordinary chapter
+/// files. If the table and the data ever disagree, `Q::N` silently returns the
+/// wrong ayah — so check every Surah boundary against the real files.
+#[test]
+fn the_verse_count_table_matches_the_data() {
+    let mut ctx = ctx!();
+
+    let mut global = 0;
+    for surah in 1..=114u64 {
+        let ayat = ctx.execute(&format!("Q:{surah}")).unwrap();
+        global += ayat.len() as u64;
+
+        // The last ayah of this Surah, addressed both ways.
+        let flat = &ctx.execute(&format!("Q::{global}")).unwrap()[0];
+        assert_eq!(flat.extra["surah"], surah, "at global ayah {global}");
+        assert_eq!(
+            flat.extra["ayah"],
+            ayat.len() as u64,
+            "at global ayah {global}"
+        );
+        assert_eq!(flat.ar, ayat[ayat.len() - 1].ar, "at global ayah {global}");
+    }
+
+    assert_eq!(global, 6236);
+    assert!(ctx.execute("Q::6237").is_err());
 }
 
 #[test]

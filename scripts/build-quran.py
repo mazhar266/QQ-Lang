@@ -22,13 +22,19 @@ submodule, which is good at those.
 Output shape matches what `src/sources/quran.rs` reads:
 
     sources/quran/chapters/{surah}.json
-    sources/quran/verses/{n}.json          (mushaf order, 1..=6236)
 
 Usage
 -----
-    python3 scripts/build-quran.py                  # fetch Tanzil, then build
-    python3 scripts/build-quran.py --tanzil FILE    # use a local copy
-    python3 scripts/build-quran.py --check          # verify, write nothing
+    python3 scripts/build-quran.py --meta DIR        # fetch Tanzil, then build
+    python3 scripts/build-quran.py --meta DIR --tanzil FILE
+    python3 scripts/build-quran.py --meta DIR --check   # verify, write nothing
+
+`--meta` is a checkout of quran-json-arabic's `dist/chapters/en`, which supplies
+the Surah names, translation and transliteration. It is only needed to rebuild,
+so it is not a submodule — grab it when you need it:
+
+    git clone --depth 1 https://github.com/asim/quran-json-arabic /tmp/qja
+    python3 scripts/build-quran.py --meta /tmp/qja/dist/chapters/en
 """
 import argparse
 import json
@@ -38,7 +44,6 @@ import sys
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SUBMODULE = os.path.join(ROOT, 'sources/quran-json-arabic/dist/chapters/en')
 OUT = os.path.join(ROOT, 'sources/quran')
 
 # Uthmani, with the pause, sajdah and rub-el-hizb marks kept.
@@ -51,7 +56,7 @@ TANZIL_URL = (
 SURAH_COUNT = 114
 AYAH_COUNT = 6236
 
-# The codepoints the submodule misuses. None may appear in the output.
+# The codepoints quran-json-arabic misuses. None may appear in the output.
 BAD_MARKS = {0x0656, 0x0657, 0x065E}
 
 
@@ -114,11 +119,11 @@ def parse_tanzil(raw):
     return verses, '\n'.join(notice)
 
 
-def load_submodule():
-    """{surah: chapter json} from quran-json-arabic."""
+def load_metadata(meta_dir):
+    """{surah: chapter json} from a quran-json-arabic dist/chapters/en."""
     chapters = {}
     for surah in range(1, SURAH_COUNT + 1):
-        with open(f'{SUBMODULE}/{surah}.json', encoding='utf-8') as f:
+        with open(f'{meta_dir}/{surah}.json', encoding='utf-8') as f:
             chapters[surah] = json.load(f)
     return chapters
 
@@ -170,9 +175,8 @@ def check(verses, chapters):
 
 def build(verses, chapters, notice):
     os.makedirs(f'{OUT}/chapters', exist_ok=True)
-    os.makedirs(f'{OUT}/verses', exist_ok=True)
+    written = 0
 
-    flat = 0
     for surah in range(1, SURAH_COUNT + 1):
         source = chapters[surah]
         out_verses = []
@@ -184,21 +188,7 @@ def build(verses, chapters, notice):
                 'translation': verse['translation'],
                 'transliteration': verse['transliteration'],
             })
-
-            flat += 1
-            with open(f'{OUT}/verses/{flat}.json', 'w', encoding='utf-8') as f:
-                json.dump({
-                    'number': ayah,
-                    'text': verses[(surah, ayah)],
-                    # Only `en`: it is the one QQL reads, and carrying the
-                    # other nine languages made this directory 27 MB.
-                    'translations': {'en': verse['translation']},
-                    'chapter': {
-                        'id': surah,
-                        'name': source['name'],
-                        'transliteration': source['transliteration'],
-                    },
-                }, f, ensure_ascii=False, separators=(',', ':'))
+            written += 1
 
         with open(f'{OUT}/chapters/{surah}.json', 'w', encoding='utf-8') as f:
             json.dump({
@@ -213,21 +203,26 @@ def build(verses, chapters, notice):
 
     with open(f'{OUT}/TANZIL-LICENSE.txt', 'w', encoding='utf-8') as f:
         f.write(notice + '\n')
-    return flat
+    return written
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--tanzil', help='local copy of the Tanzil txt-2 export')
+    ap.add_argument(
+        '--meta',
+        required=True,
+        help="quran-json-arabic dist/chapters/en, for names and translation",
+    )
     ap.add_argument('--check', action='store_true', help='verify only')
     args = ap.parse_args()
 
     verses, notice = parse_tanzil(fetch_tanzil(args.tanzil))
-    chapters = load_submodule()
+    chapters = load_metadata(args.meta)
     problems, drifted = check(verses, chapters)
 
     print(f'Tanzil ayat        : {len(verses)}')
-    print(f'submodule chapters : {len(chapters)}')
+    print(f'metadata chapters : {len(chapters)}')
     print(f'hamza-spelling only: {drifted} ayat differ in skeleton')
     if problems:
         print('\nFAILED:')
@@ -239,7 +234,7 @@ def main():
     if args.check:
         return 0
     written = build(verses, chapters, notice)
-    print(f'wrote {written} verses + {SURAH_COUNT} chapters to sources/quran/')
+    print(f'wrote {SURAH_COUNT} chapters covering {written} ayat to sources/quran/')
     return 0
 
 

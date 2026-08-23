@@ -26,7 +26,7 @@ fn cstr(s: &str) -> CString {
 }
 
 fn data_present() -> bool {
-    std::path::Path::new("sources/quran-json-arabic/dist/chapters/en/1.json").exists()
+    std::path::Path::new("sources/quran/chapters/1.json").exists()
 }
 
 #[test]
