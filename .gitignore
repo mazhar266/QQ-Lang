@@ -9,7 +9,7 @@
 
 # Vector indexes — generated from committed text by scripts/build-vectors.py,
 # and only needed with the `vector` feature. Regenerable, so not carried.
-/sources/vectors
+# /sources/vectors
 
 # Dart
 .dart_tool/

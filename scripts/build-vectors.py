@@ -126,8 +126,13 @@ def read_hadith(directory):
     base = os.path.join(SOURCES, 'hadith-json/db/by_chapter/the_9_books', directory)
     if not os.path.isdir(base):
         return
+    # Some collections carry an `introduction.json` beside the numbered
+    # chapters. QQL addresses chapters by number, so anything unnumbered is
+    # unreachable by a query and is left out of the index too.
     chapters = sorted(
-        (int(name[:-5]) for name in os.listdir(base) if name.endswith('.json')),
+        int(name[:-5])
+        for name in os.listdir(base)
+        if name.endswith('.json') and name[:-5].isdigit()
     )
     for chapter in chapters:
         with open(f'{base}/{chapter}.json', encoding='utf-8') as f:
