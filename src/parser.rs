@@ -21,11 +21,13 @@
 //! scope     := integer '~' integer
 //! selector  := item (',' item)*
 //! item      := integer | integer '-' integer
-//! text      := '"' ... '"' | "'" ... "'" | '`' ... '`'   ('~' integer)?
+//! text      := quoted | '`' ... '`' ('~' integer)? | '?' quoted ('~' integer)?
+//! quoted    := '"' ... '"' | "'" ... "'"
 //! ```
 //!
-//! Backticks ask for similarity instead of an exact match, and may carry a
-//! trailing `~N` cap: `` Q:1:`mercy`~5 ``.
+//! Quotes match exactly; backticks ask for similarity; `?` in front asks for
+//! ranked full-text search. The two ranked forms may carry a trailing `~N`
+//! cap: `` Q:1:`mercy`~5 ``, `Q:1:?"mercy"~5`.
 //!
 //! One rule resolves the only ambiguity: **an integer followed by `:` starts a
 //! new group** rather than continuing the current selector. So in
@@ -153,7 +155,7 @@ impl<'a> Parser<'a> {
         let mut references = Vec::new();
 
         // `Q:"text"` — search the whole collection.
-        if matches!(self.peek().kind, Kind::Text | Kind::Similar) {
+        if matches!(self.peek().kind, Kind::Text | Kind::Similar | Kind::FullText) {
             return Ok(vec![self.search(source, None, Vec::new())?]);
         }
 
@@ -177,7 +179,7 @@ impl<'a> Parser<'a> {
 
             let ranges = if self.eat(Kind::Colon) {
                 // `Q:1:"text"` — search inside this primary.
-                if matches!(self.peek().kind, Kind::Text | Kind::Similar) {
+                if matches!(self.peek().kind, Kind::Text | Kind::Similar | Kind::FullText) {
                     references.push(self.search(source, Some(primary), Vec::new())?);
                     break;
                 }
@@ -228,6 +230,7 @@ impl<'a> Parser<'a> {
         let kind = match token.kind {
             Kind::Text => MatchKind::Exact,
             Kind::Similar => MatchKind::Similar,
+            Kind::FullText => MatchKind::FullText,
             _ => {
                 return Err(Error::ExpectedText {
                     position: token.position,
@@ -247,7 +250,7 @@ impl<'a> Parser<'a> {
         // `~N` caps the results. Ranking is what makes a cap meaningful, so
         // it is accepted only after a similarity term.
         let limit = if self.peek().kind == Kind::Tilde {
-            if kind != MatchKind::Similar {
+            if !kind.is_ranked() {
                 return Err(Error::InvalidCharacter {
                     position: self.peek().position,
                 });

@@ -20,11 +20,21 @@ default = []
 # Vector similarity search: the `` `term` `` form. Off by default so the core
 # stays two dependencies and no vector assets are needed to build or run.
 vector = []
+# Ranked full-text search: the `?"term"` form. Pulls in tantivy, which is a
+# large dependency tree — hence a feature, and hence off by default.
+fulltext = ["dep:tantivy"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tantivy = { version = "0.22", optional = true }
 
 [[bin]]
 name = "qql"
 path = "src/bin/qql.rs"
+
+# Builds the tantivy indexes the `fulltext` feature reads.
+[[bin]]
+name = "qql-index"
+path = "src/bin/qql_index.rs"
+required-features = ["fulltext"]

@@ -127,4 +127,30 @@ impl Repository {
             .insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
         Ok(value)
     }
+
+    /// Cache a value under `key`, building it on first use.
+    ///
+    /// For assets the repository cannot read itself — a tantivy index is a
+    /// directory that its own library opens. The key shares the path-keyed
+    /// cache, so it must not collide with a real relative path.
+    pub fn cached<T, F>(&mut self, key: &str, build: F) -> Result<Arc<T>, Error>
+    where
+        T: Send + Sync + 'static,
+        F: FnOnce() -> Result<T, Error>,
+    {
+        let path = self.root.join(key);
+
+        if let Some(cached) = self.cache.get(&path) {
+            return Arc::clone(cached)
+                .downcast::<T>()
+                .map_err(|_| Error::Internal {
+                    detail: format!("cached {} under a different type", path.display()),
+                });
+        }
+
+        let value: Arc<T> = Arc::new(build()?);
+        self.cache
+            .insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
+        Ok(value)
+    }
 }

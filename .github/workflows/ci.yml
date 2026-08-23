@@ -60,6 +60,29 @@ jobs:
       - name: Test
         run: cargo test --features vector
 
+  fulltext:
+    name: Full-text search (feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # The indexes are generated, not committed.
+      - name: Build full-text indexes
+        run: cargo run --features fulltext --bin qql-index
+
+      - name: Clippy
+        run: cargo clippy --features fulltext --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --features fulltext
+
   dart:
     name: Dart binding
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 102 Rust tests (118 with `vector`) and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 104 Rust tests (128 with both optional features) and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -26,8 +26,10 @@ group      := primary ':' text              // Q:1:"..."     search
 scope      := integer '~' integer
 selector   := item (',' item)*
 item       := integer | integer '-' integer
-text       := '"' ... '"' | "'" ... "'"        exact
-            | '`' ... '`' ('~' integer)?      similar, optionally capped
+text       := quoted                          exact substring
+            | '`' ... '`' ('~' integer)?     similarity, optionally capped
+            | '?' quoted ('~' integer)?      full text, optionally capped
+quoted     := '"' ... '"' | "'" ... "'"
 source     := [A-Za-z][A-Za-z0-9_]*
 ```
 
@@ -43,6 +45,7 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | `"…"` / `'…'` | Full-text search within whatever the reference scopes. |
 | `~` | Scopes a search to an item range: `Q:1:3~5:"…"`, or caps results: ``Q:`…`~5``. |
 | `` `…` `` | Similarity search, ranked by score. Needs the `vector` feature. |
+| `?"…"` | Ranked full-text search with stemming. Needs the `fulltext` feature. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
@@ -155,6 +158,59 @@ to fall out of step with the text. Sources that declare no book-wide axis
 (a custom source without a `flat` block) refuse an unscoped search with
 `QQL_UNSUPPORTED` rather than quietly searching less than you asked for.
 
+### Three ways to search
+
+| Form | Matches | Order | Needs |
+| --- | --- | --- | --- |
+| `"term"` `'term'` | folded substring | positional | nothing |
+| `?"term"` | words, stemmed, BM25 | **ranked** | `fulltext` feature + index |
+| `` `term` `` | vector similarity | **ranked** | `vector` feature + index |
+
+The spelling picks the engine, so a build flag never changes what a query
+means. Both optional engines are refused with `QQL_UNSUPPORTED` when their
+feature or index is missing, rather than quietly falling back to substring
+matching.
+
+### Full-text search — optional
+
+Backed by [tantivy](https://github.com/quickwit-oss/tantivy). A large
+dependency, so it is a feature, **off by default**:
+
+```toml
+qql = { version = "0.1", features = ["fulltext"] }
+```
+
+```bash
+cargo run --features fulltext --bin qql-index          # every source
+cargo run --features fulltext --bin qql-index -- --source Q
+cargo run --features fulltext -- 'q:?"mercy"~5'
+```
+
+What it brings over `"term"`:
+
+```text
+q:1:"mercy"        0 hits  — "Merciful" does not contain "mercy"
+q:1:?"mercy"       2 hits  — stemming reaches it
+```
+
+The term carries tantivy's own query syntax, so boolean and phrase queries
+work. A phrase needs inner quotes, which is what the other delimiter is for:
+
+```text
+q:?"mercy OR forgiveness"~3
+q:?"prayer AND charity"~3
+q:?"prayer -charity"~3
+q:?'"straight path"'~3        phrase
+```
+
+Arabic is indexed **folded** — the corpus is fully diacritized, and an index
+over raw tokens would only match a query reproducing every mark. English is
+indexed with tantivy's `en_stem` tokenizer.
+
+Indexing all eight sources takes about three seconds and 16 MB. Unlike the
+vector indexes these are **not** committed — a tantivy index is a directory of
+binary segments whose names change on every rebuild, so it is built locally.
+
 ### Similarity search — optional
 
 Backticks ask for *similar* rather than *contains*. It is a cargo feature,
@@ -209,7 +265,7 @@ unchanged by that.
 
 | | |
 | --- | --- |
-| Index size | ~3.3 MB for the Quran (12,472 vectors × 256 `int8`) |
+| Index size | ~3.3 MB Quran, ~21 MB all eight sources |
 | Query | hash the term, then a flat `int8` dot-product scan |
 | Structure | none — no ANN index, nothing to fall out of sync |
 
@@ -218,7 +274,13 @@ multiply-accumulates; an approximate-nearest-neighbour index would add a large
 dependency and a second artifact that can drift, to beat something already
 fast enough on a weak core. Scoping narrows the scan further.
 
-Indexes are generated, not committed — run the script after changing text.
+All eight indexes are committed, so the feature works without a build step.
+Rebuild after changing text:
+
+```bash
+python3 scripts/build-vectors.py              # all sources, ~90 s, 21 MB
+python3 scripts/build-vectors.py --source Q   # just one
+```
 
 ### Source codes
 

@@ -58,6 +58,19 @@ pub enum MatchKind {
     /// Needs the `vector` feature and a built index; without either, the query
     /// is refused rather than silently downgraded to [`MatchKind::Exact`].
     Similar,
+    /// `?"term"` — ranked full-text search, with stemming and the boolean and
+    /// phrase syntax the engine understands.
+    ///
+    /// Needs the `fulltext` feature and a built index, and is refused without
+    /// them for the same reason as [`MatchKind::Similar`].
+    FullText,
+}
+
+impl MatchKind {
+    /// Whether results come back ordered by score rather than by position.
+    pub fn is_ranked(self) -> bool {
+        matches!(self, MatchKind::Similar | MatchKind::FullText)
+    }
 }
 
 /// A search term plus how to match it.

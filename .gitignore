@@ -7,9 +7,14 @@
 /fuzz/coverage
 /fuzz/Cargo.lock
 
-# Vector indexes — generated from committed text by scripts/build-vectors.py,
-# and only needed with the `vector` feature. Regenerable, so not carried.
-# /sources/vectors
+# Tantivy indexes are directories of binary segments whose names change on
+# every rebuild, so they are generated rather than carried:
+#   cargo run --features fulltext --bin qql-index
+#
+# The vector indexes next door (sources/vectors/*.qv) *are* committed — one
+# deterministic file per source, so the `vector` feature works without a
+# build step. Rebuild them with scripts/build-vectors.py.
+/sources/fulltext
 
 # Dart
 .dart_tool/

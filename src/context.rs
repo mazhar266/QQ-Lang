@@ -38,6 +38,11 @@ impl Context {
         }
     }
 
+    /// The data directory this context reads from.
+    pub fn data_dir(&self) -> &Path {
+        self.repo.root()
+    }
+
     /// The registry, for inspecting or extending the known sources.
     pub fn registry_mut(&mut self) -> &mut Registry {
         &mut self.registry
@@ -137,6 +142,9 @@ impl Context {
                     }
                     MatchKind::Similar => {
                         Self::similar(&mut self.repo, source, reference, search, &mut records)?
+                    }
+                    MatchKind::FullText => {
+                        Self::full_text(&mut self.repo, source, reference, search, &mut records)?
                     }
                 },
                 None => source.resolve(&mut self.repo, reference, &mut records)?,
@@ -247,6 +255,89 @@ impl Context {
         Ok(())
     }
 
+    /// Resolve a full-text search — the `?"term"` form.
+    #[cfg(not(feature = "fulltext"))]
+    fn full_text(
+        _repo: &mut Repository,
+        source: &dyn crate::Source,
+        _reference: &Reference,
+        _search: &crate::ast::Search,
+        _out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        Err(Error::Unsupported {
+            detail: format!(
+                "ranked full-text search needs the `fulltext` feature; {}:\"...\" does substring matching instead",
+                source.code()
+            ),
+        })
+    }
+
+    /// Resolve a full-text search against the source's tantivy index.
+    ///
+    /// Like similarity, the engine decides *which* records and the ordinary
+    /// reference path decides what they look like.
+    #[cfg(feature = "fulltext")]
+    fn full_text(
+        repo: &mut Repository,
+        source: &dyn crate::Source,
+        reference: &Reference,
+        search: &crate::ast::Search,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        use crate::fulltext::{Searcher, DEFAULT_LIMIT};
+
+        let data = repo.root().to_path_buf();
+        let code = source.code().to_string();
+        let searcher: Arc<Searcher> = match repo.cached(&format!("fulltext/{code}"), || {
+            Searcher::open(&data, &code)
+        }) {
+            Ok(searcher) => searcher,
+            Err(Error::DataFileNotFound { .. }) => {
+                return Err(Error::Unsupported {
+                    detail: format!(
+                        "no full-text index for {code}; build one with `qql-index --source {code}`"
+                    ),
+                })
+            }
+            Err(other) => return Err(other),
+        };
+
+        let limit = search.limit.unwrap_or(DEFAULT_LIMIT);
+        let hits = searcher.search(
+            &search.term,
+            reference.primary,
+            &reference.ranges,
+            limit as usize,
+        )?;
+
+        for (primary, number, score) in hits {
+            let mut found = Vec::new();
+            source.resolve(
+                repo,
+                &Reference {
+                    source: reference.source.clone(),
+                    primary: Some(primary),
+                    ranges: vec![Range {
+                        from: number,
+                        to: number,
+                    }],
+                    search: None,
+                },
+                &mut found,
+            )?;
+
+            for mut record in found {
+                record.extra.insert("score".to_string(), score_value(score));
+                record
+                    .extra
+                    .insert("ranked".to_string(), serde_json::Value::Bool(true));
+                out.push(record);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Resolve a search's scope, then keep the records that match.
     ///
     /// Search is deliberately source-agnostic: the scope is an ordinary
@@ -322,7 +413,7 @@ impl Context {
 }
 
 /// Round a score to three decimals so responses are stable to compare.
-#[cfg(feature = "vector")]
+#[cfg(any(feature = "vector", feature = "fulltext"))]
 fn score_value(score: f32) -> serde_json::Value {
     let rounded = (f64::from(score) * 1000.0).round() / 1000.0;
     serde_json::Number::from_f64(rounded)

@@ -166,15 +166,22 @@ mod with_the_feature {
         assert_eq!(hit.extra["surah_name_en"], direct.extra["surah_name_en"]);
     }
 
+    /// A source with no `.qv` file names the fix instead of failing obscurely.
+    /// The custom-source fixtures have data but no index, which keeps this
+    /// independent of which built-in indexes happen to be present.
     #[test]
     fn a_source_without_an_index_says_so() {
-        let mut ctx = ctx!();
-        let error = ctx.execute("b:1:`intentions`").unwrap_err();
+        let mut ctx = Context::new("tests/fixtures/custom");
+
+        let error = ctx.execute("x:1:`opening`").unwrap_err();
         assert_eq!(error.code(), "QQL_UNSUPPORTED");
         assert!(
             error.to_string().contains("build-vectors"),
             "the message should name the fix: {error}"
         );
+
+        // The same source still answers an exact search.
+        assert!(ctx.execute(r#"x:1:"Praise""#).is_ok());
     }
 
     #[test]

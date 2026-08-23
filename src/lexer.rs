@@ -31,6 +31,9 @@ pub enum Kind {
     /// A backtick-quoted term, which asks for similarity rather than an exact
     /// match. `text` is the content, without the backticks.
     Similar,
+    /// A quoted term prefixed with `?`, which asks for ranked full-text
+    /// search. `text` is the content, without the marker or the quotes.
+    FullText,
     /// End of input.
     Eof,
 }
@@ -72,9 +75,15 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
         //
         // Both quotes are ASCII and so cannot occur inside a multi-byte
         // sequence, making this byte scan safe for any UTF-8 content.
-        if b == b'"' || b == b'\'' || b == b'`' {
-            let quote = b;
+        // `?` only ever introduces a quoted term, so it is read together with
+        // the quote rather than as a token of its own.
+        let full_text = b == b'?' && matches!(bytes.get(i + 1), Some(b'"' | b'\'' | b'`'));
+        if full_text || b == b'"' || b == b'\'' || b == b'`' {
             let open = i;
+            if full_text {
+                i += 1;
+            }
+            let quote = bytes[i];
             i += 1;
             while i < bytes.len() && bytes[i] != quote {
                 i += 1;
@@ -82,9 +91,17 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
             if i == bytes.len() {
                 return Err(Error::UnterminatedText { position: open });
             }
+            let kind = if full_text {
+                Kind::FullText
+            } else if quote == b'`' {
+                Kind::Similar
+            } else {
+                Kind::Text
+            };
+            let from = if full_text { open + 2 } else { open + 1 };
             tokens.push(Token {
-                kind: if quote == b'`' { Kind::Similar } else { Kind::Text },
-                text: &input[open + 1..i],
+                kind,
+                text: &input[from..i],
                 position: open,
             });
             i += 1;

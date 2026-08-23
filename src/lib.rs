@@ -52,6 +52,8 @@ mod record;
 mod registry;
 mod repo;
 mod search;
+#[cfg(feature = "fulltext")]
+pub mod fulltext;
 #[cfg(feature = "vector")]
 pub mod vector;
 mod sources;
