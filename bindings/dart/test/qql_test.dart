@@ -108,6 +108,84 @@ void main() {
     }
   });
 
+  test('searches text in Arabic and English', () {
+    // Exact substring search needs no cargo feature, so it is always
+    // available through the binding.
+    final arabic = qql.execute('q:1:"الحمد"');
+    expect(arabic, hasLength(1));
+    expect(arabic.first['ayah'], 2);
+
+    final english = qql.execute('q:1:"Allah"');
+    expect(english, hasLength(2));
+
+    // Either quote delimits a term.
+    expect(qql.execute("q:1:'الحمد'"), hasLength(1));
+
+    // A search matching nothing is empty, not an exception.
+    expect(qql.execute('q:1:"zzznotpresent"'), isEmpty);
+  });
+
+  test('grouping, sticky sources and book-wide numbering cross the boundary',
+      () {
+    // One reference, two groups.
+    final groups = qql.execute('q:1:2,3,2:3,4-6');
+    expect(groups.map((r) => [r['surah'], r['ayah']]), [
+      [1, 2],
+      [1, 3],
+      [2, 3],
+      [2, 4],
+      [2, 5],
+      [2, 6],
+    ]);
+
+    // Omitted source means the Quran; a stated one carries forward.
+    expect(qql.execute('2:255').first['surah'], 2);
+    expect(qql.execute('b:1:1;3').every((r) => r['source'] == 'B'), isTrue);
+
+    // `B::N` is book-wide numbering, tagged so it cannot be misread.
+    final flat = qql.execute('b::100');
+    expect(flat.first['numbering'], 'book');
+    expect(flat.first['number'], 100);
+  });
+
+  /// The ranked engines are cargo features, so whether they answer depends on
+  /// how the native library was built. Both outcomes are correct — what must
+  /// not happen is a silent fallback to substring matching.
+  test('ranked search either works or says it is unavailable', () {
+    for (final query in ['q:1:?"mercy"', 'q:1:`worship`']) {
+      try {
+        final hits = qql.execute(query);
+        expect(hits, isNotEmpty, reason: '$query returned nothing');
+        for (final hit in hits) {
+          expect(hit['ranked'], isTrue);
+          expect(hit['score'], isA<num>());
+        }
+        // Ranked means score-ordered, unlike every other QQL result.
+        final scores = hits.map((h) => h['score'] as num).toList();
+        for (var i = 1; i < scores.length; i++) {
+          expect(scores[i - 1] >= scores[i], isTrue, reason: '$query: $scores');
+        }
+      } on QqlException catch (e) {
+        expect(e.code, 'QQL_UNSUPPORTED',
+            reason: '$query should either work or be refused, not $e');
+      }
+    }
+  });
+
+  test('errors carry their code and position', () {
+    expect(
+      () => qql.execute('q:1:1-5:3'),
+      throwsA(isA<QqlException>()
+          .having((e) => e.code, 'code', 'QQL_INVALID_CHARACTER')
+          .having((e) => e.position, 'position', 7)),
+    );
+    expect(
+      () => qql.execute('q:1:"abc'),
+      throwsA(isA<QqlException>()
+          .having((e) => e.code, 'code', 'QQL_UNTERMINATED_TEXT')),
+    );
+  });
+
   test('repeated execution does not leak or corrupt the context', () {
     for (var i = 0; i < 200; i++) {
       expect(qql.execute('Q:2:1-10'), hasLength(10));

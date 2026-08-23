@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, full-text search, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 104 Rust tests plus 9 Dart tests pass; 128 with `--features vector,fulltext`. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, full-text search, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 104 Rust tests plus 13 Dart tests pass; 128 with `--features vector,fulltext`. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -55,9 +55,15 @@ cargo +nightly fuzz run parse
 Dart binding:
 
 ```bash
-cargo build --release                    # the binding loads target/release/libqql.so
+cargo build --release --features vector,fulltext   # the binding loads target/release/libqql.so
 cd bindings/dart && dart pub get && dart test
 ```
+
+**The feature set is baked into `libqql.so`.** A plain `cargo build --release`
+— which `scripts/c-smoke.sh` runs — overwrites it with a featureless one, and
+the ranked engines then answer `QQL_UNSUPPORTED` through Dart and C until it
+is rebuilt with the flags. The Dart test for ranked search accepts either
+outcome for that reason; what it forbids is a silent fallback.
 
 Note: `cargo fmt`, `cargo clippy`, doctests, cargo-fuzz, and Miri do **not** run in this environment — no rustup, clippy is not installed, `rustdoc` fails to load `libLLVM`. Use `cargo test --lib --bins --tests` to skip doctests. They still run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and remain the contract.
 

@@ -95,8 +95,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: dart-lang/setup-dart@v1
 
+      # With the features, so the Dart tests exercise ranked search too.
       - name: Build the native library
-        run: cargo build --release
+        run: cargo build --release --features vector,fulltext
+
+      - name: Build full-text indexes
+        run: cargo run --features fulltext --bin qql-index
 
       - name: Analyze
         working-directory: bindings/dart

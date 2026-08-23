@@ -32,6 +32,21 @@ void main(List<String> args) {
       print('  ${record['en']}\n');
     }
 
+    // Search is part of the query string — no extra API.
+    for (final query in ['q:1:"الحمد"', 'q:1:?"mercy"', 'q:1:`worship`']) {
+      try {
+        final hits = qql.execute(query);
+        final score = hits.isNotEmpty && hits.first.containsKey('score')
+            ? ' (score ${hits.first['score']})'
+            : '';
+        print('$query -> ${hits.length} hit(s)$score');
+      } on QqlException catch (e) {
+        // The ranked engines are cargo features; without them, this.
+        print('$query -> ${e.code}');
+      }
+    }
+    print('');
+
     // Errors surface as exceptions, not as silent empties.
     try {
       qql.execute('Q:2:5-1');

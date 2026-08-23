@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 104 Rust tests (128 with both optional features) and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 104 Rust tests (128 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -517,7 +517,7 @@ qql_free_string()      frees it
 A `dart:ffi` binding lives in [bindings/dart/](bindings/dart/) — see its README for testing, bundling, and memory notes.
 
 ```bash
-cargo build --release
+cargo build --release --features vector,fulltext   # features are baked into the .so
 cd bindings/dart && dart pub get && dart test
 ```
 

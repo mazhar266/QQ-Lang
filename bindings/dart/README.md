@@ -12,7 +12,14 @@ dart pub get
 dart test
 ```
 
-Nine tests covering the whole path:
+To exercise the optional search engines too, build the native library with
+them — see [Optional search engines](#optional-search-engines):
+
+```bash
+cargo build --release --features vector,fulltext
+```
+
+Thirteen tests covering the whole path:
 
 ```text
 Dart → qql_context_execute() → Rust → JSON data → JSON result → Dart String → qql_free_string()
@@ -20,8 +27,10 @@ Dart → qql_context_execute() → Rust → JSON data → JSON result → Dart S
 
 They pin the things the Rust tests cannot see from this side: Arabic arriving
 byte-identical to the data file, query order and within-reference dedup
-surviving the boundary, errors becoming `QqlException` with their code and
-position intact, and 200 consecutive executions leaving the context healthy.
+surviving the boundary, grouping and sticky sources and `B::N` numbering
+crossing intact, search in both languages, ranked hits carrying `score` in
+descending order, errors becoming `QqlException` with their code and position,
+and 200 consecutive executions leaving the context healthy.
 
 There is also a console demo:
 
@@ -47,6 +56,42 @@ try {
 
 `executeJson` returns the raw response string instead, and never throws for a
 bad query — errors arrive as `{"ok": false, ...}`.
+
+## Search
+
+Searching is part of the query string, so the binding needs no extra API:
+
+```dart
+qql.execute('q:1:"الحمد"');    // Arabic, exact
+qql.execute('q:2:"prayer"');   // English, exact
+qql.execute("q:1:'الحمد'");    // either quote delimits a term
+qql.execute('q:1:?"mercy"');   // ranked full text  (fulltext feature)
+qql.execute('q:1:`worship`');  // ranked similarity (vector feature)
+```
+
+Ranked hits carry two extra fields, `score` and `ranked: true`, and come back
+ordered by score rather than by position — the only QQL results that do.
+
+## Optional search engines
+
+**The feature set is compiled into the shared library**, not chosen from Dart.
+A `libqql.so` built without them answers `?"…"` and `` `…` `` with
+`QqlException('QQL_UNSUPPORTED')`, and it never silently falls back to
+substring matching.
+
+```bash
+cargo build --release --features vector,fulltext
+cargo run --features fulltext --bin qql-index    # tantivy indexes (not committed)
+```
+
+The vector indexes are committed, so `vector` needs no build step; the tantivy
+indexes are built locally. Both live under the data directory you pass to
+`Qql.open`, so ship `sources/vectors/` — and `sources/fulltext/` if you use it
+— alongside the text.
+
+> Watch out: plain `cargo build --release` **overwrites** the library with a
+> featureless one, so anything that runs it (including `scripts/c-smoke.sh`)
+> will silently disable the ranked engines until you rebuild with the flags.
 
 ## Memory
 
@@ -81,4 +126,6 @@ All of them fall out of the `crate-type` list in the root `Cargo.toml`.
 
 The data directory must also ship with the app; on Android and iOS that means
 copying `sources/` into app storage at first launch and passing that path to
-`Qql.open`.
+`Qql.open`. That includes `sources/vectors/` (~21 MB) if you build with
+`vector`, and `sources/fulltext/` (~16 MB) if you build with `fulltext` —
+budget for them before enabling either on a low-end device.
