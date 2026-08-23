@@ -181,9 +181,13 @@ qql = { version = "0.1", features = ["fulltext"] }
 ```
 
 ```bash
-cargo run --features fulltext --bin qql-index          # every source
+# 1. build the indexes once (every source, or just one)
+cargo run --features fulltext --bin qql-index
 cargo run --features fulltext --bin qql-index -- --source Q
+
+# 2. query — mind the outer single quotes, or the shell eats the inner ones
 cargo run --features fulltext -- 'q:?"mercy"~5'
+cargo run --features fulltext -- "q:?'mercy'~5"
 ```
 
 What it brings over `"term"`:

@@ -9,6 +9,9 @@ repository = "https://github.com/mazhar266/QQ-Lang"
 readme = "README.md"
 keywords = ["quran", "hadith", "query", "parser"]
 categories = ["parser-implementations", "text-processing"]
+# With `fulltext` on there are two binaries; without this, `cargo run` refuses
+# to pick one.
+default-run = "qql"
 
 [lib]
 # `rlib` for Rust consumers and the test harness; `cdylib` and `staticlib`
