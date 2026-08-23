@@ -133,6 +133,16 @@ impl Source for HisnulMuslim {
         vec!["HISN"]
     }
 
+    fn total(&self, repo: &mut Repository) -> Result<Option<u32>, Error> {
+        let book: std::sync::Arc<Book> = repo.load(FILE)?;
+        u32::try_from(book.chapters.iter().map(|c| c.text.len()).sum::<usize>())
+            .map(Some)
+            .map_err(|_| Error::InvalidDataFile {
+                path: FILE.to_string(),
+                detail: "implausible supplication count".into(),
+            })
+    }
+
     fn resolve(
         &self,
         repo: &mut Repository,

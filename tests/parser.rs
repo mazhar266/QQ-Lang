@@ -262,6 +262,65 @@ fn whitespace_around_tokens_is_legal() {
     assert_eq!(refs("  Q:1 ;  Q:2  "), refs("Q:1;Q:2"));
 }
 
+/// Search scopes: `Q:"t"`, `Q:1:"t"`, `Q:1:3~5:"t"`, and a bare `"t"`.
+#[test]
+fn search_terms_parse_as_scoped_references() {
+    fn search(query: &str) -> (String, Option<u32>, Vec<(u32, u32)>, String) {
+        let r = parse(query).unwrap().references.remove(0);
+        (
+            r.source.clone().unwrap_or_default(),
+            r.primary,
+            r.ranges.iter().map(|g| (g.from, g.to)).collect(),
+            r.text.clone().unwrap(),
+        )
+    }
+
+    // Whole collection.
+    assert_eq!(
+        search(r#"q:"text""#),
+        ("Q".into(), None, vec![], "text".into())
+    );
+    // Bare term — no code stated, so the registry's default applies.
+    assert_eq!(search(r#""text""#), ("".into(), None, vec![], "text".into()));
+    // Within a primary.
+    assert_eq!(
+        search(r#"q:1:"text""#),
+        ("Q".into(), Some(1), vec![], "text".into())
+    );
+    // Within a range of one primary.
+    assert_eq!(
+        search(r#"q:1:3~5:"text""#),
+        ("Q".into(), Some(1), vec![(3, 5)], "text".into())
+    );
+
+    let reference = &parse(r#"q:1:"text""#).unwrap().references[0];
+    assert!(reference.is_search());
+    // A search without a Surah scope is not the `Q::N` flat form.
+    assert!(!parse(r#"q:"text""#).unwrap().references[0].is_flat());
+    assert!(!parse("Q:1:1").unwrap().references[0].is_search());
+
+    // Either quote delimits a term, identically.
+    assert_eq!(search("q:1:'text'"), search(r#"q:1:"text""#));
+    assert_eq!(search("'text'"), search(r#""text""#));
+    assert_eq!(search("q:1:3~5:'text'"), search(r#"q:1:3~5:"text""#));
+
+    // Each quote carries the other verbatim, which is how a term containing
+    // one is written.
+    assert_eq!(search(r#"q:"Allah's""#).3, "Allah's");
+    assert_eq!(search(r#"q:'say "this"'"#).3, r#"say "this""#);
+
+    // Terms are taken literally: spaces, colons and Arabic all survive.
+    assert_eq!(search(r#"q:"a b:c-1""#).3, "a b:c-1");
+    assert_eq!(search(r#"q:"الحمد""#).3, "الحمد");
+
+    // Searches mix with ordinary references, and inherit the stated source.
+    let mixed = parse(r#"b:1:1;"text""#).unwrap().references;
+    assert_eq!(mixed.len(), 2);
+    assert!(!mixed[0].is_search());
+    assert_eq!(mixed[1].source.as_deref(), Some("B"));
+    assert_eq!(mixed[1].text.as_deref(), Some("text"));
+}
+
 /// Each invalid query pins both the variant and the reported offset.
 #[test]
 fn invalid_queries() {
@@ -287,6 +346,19 @@ fn invalid_queries() {
         ("Q:2*3", "QQL_INVALID_CHARACTER", Some(3)),
         ("Q:1;;Q:2", "QQL_EXPECTED_SOURCE", Some(4)),
         ("Q:99999999999999999999", "QQL_EXPECTED_NUMBER", Some(2)),
+        // Search terms.
+        (r#"q:1:"abc"#, "QQL_UNTERMINATED_TEXT", Some(4)),
+        ("q:1:'abc", "QQL_UNTERMINATED_TEXT", Some(4)),
+        // A term opened with one quote is not closed by the other.
+        (r#"q:1:'abc""#, "QQL_UNTERMINATED_TEXT", Some(4)),
+        ("q:1:''", "QQL_EXPECTED_TEXT", Some(4)),
+        (r#"""#, "QQL_UNTERMINATED_TEXT", Some(0)),
+        (r#"q:1:"""#, "QQL_EXPECTED_TEXT", Some(4)),
+        (r#"q:1:"   ""#, "QQL_EXPECTED_TEXT", Some(4)),
+        (r#"q:1:3~5"#, "QQL_EXPECTED_COLON", Some(7)),
+        (r#"q:1:3~5:"#, "QQL_EXPECTED_TEXT", Some(8)),
+        (r#"q:1:5~3:"x""#, "QQL_INVALID_RANGE", Some(4)),
+        (r#"q:1:3~"#, "QQL_EXPECTED_NUMBER", Some(6)),
     ];
 
     for (query, code, position) in cases {
@@ -302,8 +374,9 @@ fn invalid_queries() {
 #[test]
 fn parsing_never_panics_on_garbage() {
     let alphabet = [
-        "", "Q", "q", "HM", ":", ";", ",", "-", "0", "1", "9", "4294967295",
-        "99999999999999999999", " ", "\t", "*", "\u{0}", "٢", "🕋", "\u{200b}",
+        "", "Q", "q", "HM", ":", ";", ",", "-", "~", "\"", "\"a\"", "'", "'a'", "0", "1", "9",
+        "4294967295", "99999999999999999999", " ", "\t", "*", "\u{0}", "٢", "🕋",
+        "\u{200b}",
     ];
 
     // Every pair and triple over a nasty alphabet — ~9000 queries.

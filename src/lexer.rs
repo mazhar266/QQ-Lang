@@ -23,6 +23,11 @@ pub enum Kind {
     Comma,
     /// `-`
     Dash,
+    /// `~`, which opens the item range of a search scope.
+    Tilde,
+    /// A quoted search term, written with `"` or `'`. `text` is the content,
+    /// without the quotes.
+    Text,
     /// End of input.
     Eof,
 }
@@ -55,11 +60,40 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
         }
 
         let start = i;
+
+        // A quoted search term, in either quote. There are no escapes: the
+        // first matching close ends it, which keeps needles literal and the
+        // lexer honest. Accepting both means a term containing one quote can
+        // always be written with the other — `'Allah\'s'` would end early,
+        // `"Allah's"` does not.
+        //
+        // Both quotes are ASCII and so cannot occur inside a multi-byte
+        // sequence, making this byte scan safe for any UTF-8 content.
+        if b == b'"' || b == b'\'' {
+            let quote = b;
+            let open = i;
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                i += 1;
+            }
+            if i == bytes.len() {
+                return Err(Error::UnterminatedText { position: open });
+            }
+            tokens.push(Token {
+                kind: Kind::Text,
+                text: &input[open + 1..i],
+                position: open,
+            });
+            i += 1;
+            continue;
+        }
+
         let kind = match b {
             b':' => Kind::Colon,
             b';' => Kind::Semicolon,
             b',' => Kind::Comma,
             b'-' => Kind::Dash,
+            b'~' => Kind::Tilde,
             b if b.is_ascii_alphabetic() => {
                 i += 1;
                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
@@ -155,6 +189,36 @@ mod tests {
         match tokenize("Q:2*3") {
             Err(Error::InvalidCharacter { position }) => assert_eq!(position, 3),
             other => panic!("expected InvalidCharacter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn quoted_terms_use_either_quote() {
+        for query in [r#"q:1:"text""#, "q:1:'text'"] {
+            let tokens = tokenize(query).unwrap();
+            let term = tokens[tokens.len() - 2];
+            assert_eq!(term.kind, Kind::Text, "for {query}");
+            assert_eq!(term.text, "text", "for {query}");
+            assert_eq!(term.position, 4, "for {query}");
+        }
+    }
+
+    #[test]
+    fn one_quote_can_carry_the_other_verbatim() {
+        let tokens = tokenize("q:\"Allah's\"").unwrap();
+        assert_eq!(tokens[2].text, "Allah's");
+
+        let tokens = tokenize("q:'say \"this\"'").unwrap();
+        assert_eq!(tokens[2].text, "say \"this\"");
+    }
+
+    #[test]
+    fn an_unclosed_term_reports_its_opening_quote() {
+        for (query, position) in [(r#"q:"abc"#, 2), ("q:'abc", 2)] {
+            match tokenize(query) {
+                Err(Error::UnterminatedText { position: got }) => assert_eq!(got, position),
+                other => panic!("expected UnterminatedText for {query}, got {other:?}"),
+            }
         }
     }
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 85 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (B/M/AD/T/N/IM), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, full-text search, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 97 Rust tests plus 9 Dart tests pass. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 
@@ -69,6 +69,11 @@ Consequences that are easy to get wrong:
 - **Optional source:** `Reference::source` is `Option<String>`; `1,2:255` parses with `None`. The parser must not learn that the default is `Q` — `Registry::DEFAULT_CODE` owns that, and `Context::execute` substitutes it so resolvers always see a concrete code.
 - **Sticky source:** a stated code carries forward to later references in the same query — `b:1:1;3` is Bukhari twice, `b:1:1;q:3` switches. The parser threads an `inherited: Option<String>` through `query()`, which is still pure syntax since "reuse the previous code" needs no knowledge of the codes. `None` therefore means *no code appeared anywhere earlier in the query*, and only then does the registry default apply.
 - `;` separates *sources*, not references; commas already join groups under one source. A trailing `;` is optional.
+- **Search:** `Q:1:3~5:"text"` sets `Reference::text`; `primary`/`ranges` then scope *where* to search rather than what to return. `~` (not `-`) marks a search scope, which is what keeps `Q:1:3-5` and `Q:1:3~5:"x"` apart. Execution lives in `Context::search` and is source-agnostic — it resolves the scope as an ordinary reference and filters, so every source gets search from one code path. `Source::total()` supplies the bound for the unscoped `Q:"text"` form; `None` means an unscoped search is refused with `QQL_UNSUPPORTED` rather than silently narrowed.
+- A term may be delimited by `"` or `'`, and the lexer closes it only with the quote it opened with — that is what lets `"Allah's"` and `'say "this"'` be written at all. No escapes.
+- Matching tries the needle against a record's `ar` *and* `en`, so one term searches both languages. It is plain substring, not stemming: `"mercy"` does not match *Merciful*.
+- [src/search.rs](src/search.rs) folds Arabic for comparison only — harakat, superscript alef, Quranic marks, tatweel, alef seats, `ى`/`ة`. Without it search is useless, since the text is fully diacritized and a typed needle would never match. Output text is never folded.
+- `Reference::is_flat()` must stay `primary.is_none() && text.is_none()` — an unscoped search also has no primary but is not the `::` form.
 - Adding a collection (`T` = Tirmidhi) means a new `src/sources/*.rs` with `impl Source`, one registry entry, one data directory — and zero lexer or parser edits. If a source change touches the parser, the design is being violated.
 - The parser never reads files; the repository never parses queries.
 - The AST is plain structs (`Query` / `Reference` / `Range`), never `serde_json::Value`. Deriving `Serialize` on it is fine; *building* it from JSON is not.

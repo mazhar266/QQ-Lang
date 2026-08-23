@@ -39,6 +39,16 @@ pub trait Source: Send + Sync {
         Vec::new()
     }
 
+    /// How many items the collection holds end to end, if it can say.
+    ///
+    /// This is the count the `SOURCE::N` axis runs over, and it is what lets
+    /// `SOURCE:"text"` search everything without the caller naming a range.
+    /// `None` means the source has no such axis, and a whole-collection search
+    /// is refused rather than silently narrowed.
+    fn total(&self, _repo: &mut Repository) -> Result<Option<u32>, Error> {
+        Ok(None)
+    }
+
     /// Validate, load, and append records — in the order the query asked for.
     ///
     /// Semantic validation lives here rather than in a separate `validate`

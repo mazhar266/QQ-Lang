@@ -51,6 +51,7 @@ mod parser;
 mod record;
 mod registry;
 mod repo;
+mod search;
 mod sources;
 
 pub use ast::{Query, Range, Reference};

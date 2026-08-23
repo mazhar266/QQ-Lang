@@ -246,6 +246,150 @@ fn a_stated_source_carries_forward_across_semicolons() {
     assert_eq!(leading[1].source, "B");
 }
 
+/// Full-text search, scoped four ways.
+#[test]
+fn search_finds_text_within_its_scope() {
+    let mut ctx = ctx!();
+
+    // Within one Surah. Al-Fatihah 1:2 is the only "الحمد" there.
+    let hits = ctx.execute(r#"q:1:"الحمد""#).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].extra["surah"], 1);
+    assert_eq!(hits[0].extra["ayah"], 2);
+
+    // Within an ayah range of one Surah.
+    let scoped = ctx.execute(r#"q:1:3~5:"You""#).unwrap();
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].extra["ayah"], 5);
+    // The same term outside the scope is not reported.
+    assert!(ctx.execute(r#"q:1:3~4:"You""#).unwrap().is_empty());
+
+    // The whole collection, with and without the code written out.
+    let whole = ctx.execute(r#"q:"الحمد""#).unwrap();
+    assert!(whole.len() > 20, "expected many hits, got {}", whole.len());
+    assert_eq!(whole.len(), ctx.execute(r#""الحمد""#).unwrap().len());
+    assert!(whole.iter().all(|r| r.source == "Q"));
+    // Results stay in mushaf order.
+    assert_eq!(whole[0].extra["surah"], 1);
+
+    // English matches too, case-insensitively.
+    assert_eq!(
+        ctx.execute(r#"q:112:"Allah""#).unwrap().len(),
+        ctx.execute(r#"q:112:"ALLAH""#).unwrap().len()
+    );
+}
+
+/// Arabic and English are searched together — a term is tried against both
+/// fields of every record in scope.
+#[test]
+fn search_covers_arabic_and_english_alike() {
+    let mut ctx = ctx!();
+
+    // English only appears in `en`.
+    let english = ctx.execute(r#"q:1:"Allah""#).unwrap();
+    assert_eq!(english.len(), 2);
+    assert!(english.iter().all(|r| r.en.to_lowercase().contains("allah")));
+
+    // Arabic only appears in `ar`.
+    let arabic = ctx.execute(r#"q:1:"الحمد""#).unwrap();
+    assert_eq!(arabic.len(), 1);
+
+    // Both reach the same ayah when each field mentions it.
+    assert!(!ctx.execute(r#"q:"Pharaoh""#).unwrap().is_empty());
+    assert!(!ctx.execute(r#"q:2:"prayer""#).unwrap().is_empty());
+    assert!(!ctx.execute(r#"b:1:"revelation""#).unwrap().is_empty());
+}
+
+/// `'` and `"` delimit a term identically; each carries the other verbatim.
+#[test]
+fn either_quote_delimits_a_search_term() {
+    let mut ctx = ctx!();
+
+    for (single, double) in [
+        ("q:1:'الحمد'", r#"q:1:"الحمد""#),
+        ("q:1:'Allah'", r#"q:1:"Allah""#),
+        ("q:1:3~5:'You'", r#"q:1:3~5:"You""#),
+        ("'mercy'", r#""mercy""#),
+    ] {
+        assert_eq!(
+            ctx.execute(single).unwrap().len(),
+            ctx.execute(double).unwrap().len(),
+            "{single} and {double} should agree"
+        );
+    }
+
+    // An apostrophe inside a term needs the other quote around it.
+    assert!(!ctx.execute(r#"b:1:"Allah's""#).unwrap().is_empty());
+    assert_eq!(
+        ctx.execute("b:1:'Allah's'").unwrap_err().code(),
+        "QQL_UNTERMINATED_TEXT"
+    );
+}
+
+/// The Quran text is fully diacritized, so a typed needle shares no substring
+/// with it unless the marks are folded away for comparison.
+#[test]
+fn search_folds_arabic_diacritics() {
+    let mut ctx = ctx!();
+
+    // Undiacritized needle against diacritized scripture.
+    assert_eq!(ctx.execute(r#"q:1:"الحمد""#).unwrap().len(), 1);
+    // The stored spelling still matches, and both find the same ayah.
+    assert_eq!(ctx.execute(r#"q:1:"ٱلْحَمْدُ""#).unwrap().len(), 1);
+
+    // Folding is for comparison only — the record keeps its marks.
+    let hit = &ctx.execute(r#"q:1:"الحمد""#).unwrap()[0];
+    assert_eq!(hit.ar, ctx.execute("q:1:2").unwrap()[0].ar);
+    assert!(hit.ar.contains('\u{064E}'), "diacritics were stripped from output");
+}
+
+/// Search is source-agnostic: it filters whatever the scope resolves to.
+#[test]
+fn search_works_for_every_source() {
+    let mut ctx = ctx!();
+
+    let bukhari = ctx.execute(r#"b:1:"intentions""#).unwrap();
+    assert_eq!(bukhari.len(), 1);
+    assert_eq!(bukhari[0].source, "B");
+    assert_eq!(bukhari[0].extra["chapter"], 1);
+
+    assert!(!ctx.execute(r#"hm:1:"Allah""#).unwrap().is_empty());
+
+    // A stated source carries into a bare search term, as anywhere else — but
+    // only the source. The term itself is unscoped, so it searches all of
+    // Bukhari rather than the chapter named just before it.
+    let inherited = ctx.execute(r#"b:1:1;"intentions""#).unwrap();
+    assert!(inherited.iter().all(|r| r.source == "B"));
+    assert!(
+        inherited.len() > ctx.execute(r#"b:1:"intentions""#).unwrap().len(),
+        "an unscoped term should reach past chapter 1"
+    );
+}
+
+#[test]
+fn a_search_that_matches_nothing_is_empty_not_an_error() {
+    let mut ctx = ctx!();
+    let value = ctx.execute_value(r#"q:1:"zzzznotpresent""#);
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["results"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn search_scopes_are_validated_like_any_other_reference() {
+    let mut ctx = ctx!();
+
+    // Surah 115 does not exist, search or not.
+    assert_eq!(
+        ctx.execute(r#"q:115:"x""#).unwrap_err().code(),
+        "QQL_REFERENCE_NOT_FOUND"
+    );
+    // Neither does ayah 99 of Al-Fatihah.
+    assert_eq!(
+        ctx.execute(r#"q:1:3~99:"x""#).unwrap_err().code(),
+        "QQL_REFERENCE_NOT_FOUND"
+    );
+}
+
 #[test]
 fn boundaries() {
     let mut ctx = ctx!();

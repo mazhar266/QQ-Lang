@@ -35,6 +35,21 @@ pub enum Error {
         /// Byte offset into the query.
         position: usize,
     },
+    /// A quoted search term was required here.
+    ExpectedText {
+        /// Byte offset into the query.
+        position: usize,
+    },
+    /// A quoted search term was opened and never closed.
+    UnterminatedText {
+        /// Byte offset of the opening quote.
+        position: usize,
+    },
+    /// The source cannot do what the query asked of it.
+    Unsupported {
+        /// What is not supported, and by which source.
+        detail: String,
+    },
     /// A range whose start is greater than its end.
     InvalidRange {
         /// Byte offset of the start of the range.
@@ -79,6 +94,9 @@ impl Error {
             Error::ExpectedSource { .. } => "QQL_EXPECTED_SOURCE",
             Error::ExpectedColon { .. } => "QQL_EXPECTED_COLON",
             Error::ExpectedNumber { .. } => "QQL_EXPECTED_NUMBER",
+            Error::ExpectedText { .. } => "QQL_EXPECTED_TEXT",
+            Error::UnterminatedText { .. } => "QQL_UNTERMINATED_TEXT",
+            Error::Unsupported { .. } => "QQL_UNSUPPORTED",
             Error::InvalidRange { .. } => "QQL_INVALID_RANGE",
             Error::UnknownSource { .. } => "QQL_UNKNOWN_SOURCE",
             Error::ReferenceNotFound { .. } => "QQL_REFERENCE_NOT_FOUND",
@@ -95,8 +113,11 @@ impl Error {
             | Error::ExpectedSource { position }
             | Error::ExpectedColon { position }
             | Error::ExpectedNumber { position }
+            | Error::ExpectedText { position }
+            | Error::UnterminatedText { position }
             | Error::InvalidRange { position } => Some(*position),
             Error::EmptyQuery
+            | Error::Unsupported { .. }
             | Error::UnknownSource { .. }
             | Error::ReferenceNotFound { .. }
             | Error::DataFileNotFound { .. }
@@ -132,6 +153,9 @@ impl fmt::Display for Error {
             Error::ExpectedSource { .. } => f.write_str("Expected a source identifier"),
             Error::ExpectedColon { .. } => f.write_str("Expected ':'"),
             Error::ExpectedNumber { .. } => f.write_str("Expected a number"),
+            Error::ExpectedText { .. } => f.write_str("Expected a quoted search term"),
+            Error::UnterminatedText { .. } => f.write_str("Unclosed quoted search term"),
+            Error::Unsupported { detail } => write!(f, "Not supported: {detail}"),
             Error::InvalidRange { .. } => {
                 f.write_str("Range start cannot be greater than range end")
             }

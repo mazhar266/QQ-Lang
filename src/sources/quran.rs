@@ -100,6 +100,10 @@ impl Source for Quran {
         "Quran"
     }
 
+    fn total(&self, _repo: &mut Repository) -> Result<Option<u32>, Error> {
+        Ok(Some(AYAH_COUNT))
+    }
+
     fn resolve(
         &self,
         repo: &mut Repository,

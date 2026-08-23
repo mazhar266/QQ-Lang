@@ -180,6 +180,25 @@ impl Source for JsonSource {
         self.spec.aliases.iter().map(String::as_str).collect()
     }
 
+    fn total(&self, repo: &mut Repository) -> Result<Option<u32>, Error> {
+        let Some(flat) = &self.spec.flat else {
+            return Ok(None);
+        };
+        let root: std::sync::Arc<Value> = repo.load(&flat.path)?;
+        let items = at(&root, &flat.items)
+            .and_then(Value::as_array)
+            .ok_or_else(|| Error::InvalidDataFile {
+                path: flat.path.clone(),
+                detail: format!("no array at '{}'", flat.items),
+            })?;
+        u32::try_from(items.len())
+            .map(Some)
+            .map_err(|_| Error::InvalidDataFile {
+                path: flat.path.clone(),
+                detail: "implausible item count".into(),
+            })
+    }
+
     fn resolve(
         &self,
         repo: &mut Repository,

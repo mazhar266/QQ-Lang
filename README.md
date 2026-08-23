@@ -10,18 +10,23 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 85 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 97 Rust tests and 9 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
 ```text
 query      := reference (';' reference)* ';'?
 reference  := (source ':')? body
-body       := ':' selector                 // B::100
+body       := text                          // Q:"..."       search
+            | ':' selector                  // B::100
             | group (',' group)*
-group      := primary (':' selector)?
+group      := primary ':' text              // Q:1:"..."     search
+            | primary ':' scope ':' text    // Q:1:3~5:"..." search
+            | primary (':' selector)?
+scope      := integer '~' integer
 selector   := item (',' item)*
 item       := integer | integer '-' integer
+text       := '"' ... '"' | "'" ... "'"
 source     := [A-Za-z][A-Za-z0-9_]*
 ```
 
@@ -34,6 +39,8 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | `,` | Joins items, and joins groups: `1:2,3,2:5` |
 | `;` | Separates references. Only needed to switch collection or start a new primary; a trailing one is optional. |
 | `::` | Skips the primary: `B::100` numbers across the whole collection. |
+| `"…"` / `'…'` | Full-text search within whatever the reference scopes. |
+| `~` | Scopes a search to an item range: `Q:1:3~5:"…"`. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
@@ -92,6 +99,60 @@ The Quran default applies only when nothing has been named yet — `1,2:255` and
 
 The parser handles the carry-forward, which stays pure syntax: "reuse the previous code" needs no idea what the codes mean. It never learns that `Q` is the default either — it records that no code was stated, and the registry substitutes one when resolving.
 
+### Search
+
+A quoted term searches the text instead of addressing it. The reference in
+front of it says *where* to look:
+
+```text
+"text"            search the Quran — the default source
+q:"text"          search the whole Quran
+q:1:"text"        search Surah 1
+q:1:3~5:"text"    search ayat 3–5 of Surah 1
+b:1:"text"        search Bukhari chapter 1
+b:"text"          search all of Bukhari
+```
+
+Either quote delimits a term, identically — so a term containing one can
+always be written with the other:
+
+```text
+q:1:'الحمد'       same as q:1:"الحمد"
+b:1:"Allah's"     an apostrophe needs the double quotes
+q:'say "this"'    and the reverse
+```
+
+There are no escapes: the first matching close ends the term.
+
+**Arabic and English are searched together.** Every record in scope is tried
+against both its `ar` and its `en`, so `q:2:"prayer"` and `q:2:"الصلاة"` both
+work without saying which language you mean.
+
+Results are ordinary records, in the order they appear in the text. A search
+that matches nothing is an empty `results`, not an error.
+
+`~` rather than `-` marks a search scope, which keeps it apart from the `1-5`
+of an ordinary selector — `Q:1:3-5` returns three ayat, `Q:1:3~5:"x"` searches
+them.
+
+**Arabic is matched with the marks folded away.** The Quran text is fully
+diacritized, so a typed `الحمد` shares no substring with the stored
+`ٱلْحَمْدُ`. For comparison only, QQL drops harakat, sukun, the superscript
+alef and the Quranic annotation marks, folds the alef seats (`أ إ آ ٱ` → `ا`),
+`ى` → `ي` and `ة` → `ه`, and lowercases ASCII. Records come back with their
+text exactly as stored — nothing rewrites scripture.
+
+Matching is plain substring, not word or stem matching: `"mercy"` does not
+find *Merciful*, and `"pray"` does find *prayer*. It covers `ar` and `en` but
+not metadata, so `"Al-Fatihah"` finds nothing — Surah names are not part of
+the verse text.
+
+The scan is linear over the scope — at 6236 ayat a whole-Quran search takes
+about 100 ms cold, including reading every chapter file, and there is no index
+to fall out of step with the text. Sources that declare no book-wide axis
+(a custom source without a `flat` block) refuse an unscoped search with
+`QQL_UNSUPPORTED` rather than quietly searching less than you asked for.
+
 ### Source codes
 
 | Code | Collection | `primary` is |
@@ -148,6 +209,10 @@ Q::1-7;B::1;           flat form mixes freely with the rest
 q:1:2,3,2:3,4-6        two groups under one source
 b:1:1;3                the source carries forward — Bukhari twice
 b:1:1;q:3              …until another code switches it
+q:1:"الحمد"            search Surah 1 in Arabic
+q:2:"prayer"           search Surah 2 in English
+q:1:3~5:"You"          search ayat 3–5
+'mercy'                either quote works
 ```
 
 ### Ordering and duplicates
@@ -262,7 +327,7 @@ Errors are still valid JSON, never a malformed string:
 }
 ```
 
-Error codes: `QQL_EMPTY_QUERY`, `QQL_INVALID_CHARACTER`, `QQL_EXPECTED_SOURCE`, `QQL_EXPECTED_COLON`, `QQL_EXPECTED_NUMBER`, `QQL_INVALID_RANGE`, `QQL_UNKNOWN_SOURCE`, `QQL_SOURCE_NOT_LOADED`, `QQL_REFERENCE_NOT_FOUND`, `QQL_DATA_FILE_NOT_FOUND`, `QQL_INVALID_DATA_FILE`, `QQL_OUT_OF_MEMORY`, `QQL_INTERNAL_ERROR`.
+Error codes: `QQL_EMPTY_QUERY`, `QQL_INVALID_CHARACTER`, `QQL_EXPECTED_SOURCE`, `QQL_EXPECTED_COLON`, `QQL_EXPECTED_NUMBER`, `QQL_EXPECTED_TEXT`, `QQL_UNTERMINATED_TEXT`, `QQL_INVALID_RANGE`, `QQL_UNKNOWN_SOURCE`, `QQL_UNSUPPORTED`, `QQL_REFERENCE_NOT_FOUND`, `QQL_DATA_FILE_NOT_FOUND`, `QQL_INVALID_DATA_FILE`, `QQL_INTERNAL_ERROR`.
 
 `position` is a byte offset into the query and is present only for errors that have one.
 

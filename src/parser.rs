@@ -12,11 +12,16 @@
 //! ```text
 //! query     := reference (';' reference)* ';'?
 //! reference := (source ':')? body
-//! body      := ':' selector              // B::100, book-wide numbering
+//! body      := text                      // Q:"..."   whole collection
+//!            | ':' selector              // B::100    book-wide numbering
 //!            | group (',' group)*
-//! group     := primary (':' selector)?
+//! group     := primary ':' text          // Q:1:"..."      within a primary
+//!            | primary ':' scope ':' text // Q:1:3~5:"..."  within a range
+//!            | primary (':' selector)?
+//! scope     := integer '~' integer
 //! selector  := item (',' item)*
 //! item      := integer | integer '-' integer
+//! text      := '"' ... '"'
 //! ```
 //!
 //! One rule resolves the only ambiguity: **an integer followed by `:` starts a
@@ -116,7 +121,9 @@ impl<'a> Parser<'a> {
     /// this reference states one of its own.
     fn reference(&mut self, inherited: &mut Option<String>) -> Result<Vec<Reference>, Error> {
         let token = self.peek();
-        if token.kind != Kind::Ident && token.kind != Kind::Integer {
+        // A reference starts with a code, a number, or — for a bare `"text"`
+        // search — the term itself.
+        if !matches!(token.kind, Kind::Ident | Kind::Integer | Kind::Text) {
             return Err(Error::ExpectedSource {
                 position: token.position,
             });
@@ -142,6 +149,11 @@ impl<'a> Parser<'a> {
 
         let mut references = Vec::new();
 
+        // `Q:"text"` — search the whole collection.
+        if self.peek().kind == Kind::Text {
+            return Ok(vec![self.search(source, None, Vec::new())?]);
+        }
+
         // `B::100` — a second colon skips the primary. Only a source written
         // right here can be followed by that colon, so `Q:` and `Q::` stay the
         // errors they were rather than quietly becoming "the whole collection".
@@ -150,6 +162,7 @@ impl<'a> Parser<'a> {
                 source: source.clone(),
                 primary: None,
                 ranges: self.selector()?,
+                text: None,
             });
             if !self.eat(Kind::Comma) {
                 return Ok(references);
@@ -157,8 +170,30 @@ impl<'a> Parser<'a> {
         }
 
         loop {
-            let primary = Some(self.integer()?);
+            let primary = self.integer()?;
+
             let ranges = if self.eat(Kind::Colon) {
+                // `Q:1:"text"` — search inside this primary.
+                if self.peek().kind == Kind::Text {
+                    references.push(self.search(source, Some(primary), Vec::new())?);
+                    break;
+                }
+
+                // `Q:1:3~5:"text"` — search a range inside it. `~` marks a
+                // scope rather than a selection, which is what keeps it apart
+                // from the `1-5` of an ordinary selector.
+                if self.scope_follows() {
+                    let scope = self.scope()?;
+                    let token = self.peek();
+                    if !self.eat(Kind::Colon) {
+                        return Err(Error::ExpectedColon {
+                            position: token.position,
+                        });
+                    }
+                    references.push(self.search(source, Some(primary), vec![scope])?);
+                    break;
+                }
+
                 self.selector()?
             } else {
                 Vec::new()
@@ -166,8 +201,9 @@ impl<'a> Parser<'a> {
 
             references.push(Reference {
                 source: source.clone(),
-                primary,
+                primary: Some(primary),
                 ranges,
+                text: None,
             });
 
             if !self.eat(Kind::Comma) {
@@ -176,6 +212,55 @@ impl<'a> Parser<'a> {
         }
 
         Ok(references)
+    }
+
+    /// Consume a quoted term and build the search node.
+    fn search(
+        &mut self,
+        source: Option<String>,
+        primary: Option<u32>,
+        ranges: Vec<Range>,
+    ) -> Result<Reference, Error> {
+        let token = self.peek();
+        if token.kind != Kind::Text {
+            return Err(Error::ExpectedText {
+                position: token.position,
+            });
+        }
+        self.advance();
+
+        // An empty needle would match every record, which is never what
+        // someone meant to type.
+        if token.text.trim().is_empty() {
+            return Err(Error::ExpectedText {
+                position: token.position,
+            });
+        }
+
+        Ok(Reference {
+            source,
+            primary,
+            ranges,
+            text: Some(token.text.to_string()),
+        })
+    }
+
+    /// Does `integer '~'` start here?
+    fn scope_follows(&self) -> bool {
+        self.peek().kind == Kind::Integer && self.peek_at(1).kind == Kind::Tilde
+    }
+
+    /// `scope := integer '~' integer`
+    fn scope(&mut self) -> Result<Range, Error> {
+        let position = self.peek().position;
+        let from = self.integer()?;
+        self.advance(); // the `~`, already seen by `scope_follows`
+        let to = self.integer()?;
+
+        if from > to {
+            return Err(Error::InvalidRange { position });
+        }
+        Ok(Range { from, to })
     }
 
     /// `selector := item (',' item)*`, stopping before the next group.

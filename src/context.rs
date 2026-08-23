@@ -3,7 +3,7 @@
 
 //! Execution context: registry plus data cache.
 
-use crate::ast::{Query, Reference};
+use crate::ast::{Query, Range, Reference};
 use crate::error::Error;
 use crate::record::Record;
 use crate::registry::Registry;
@@ -130,10 +130,61 @@ impl Context {
                 &concrete
             };
 
-            source.resolve(&mut self.repo, reference, &mut records)?;
+            match &reference.text {
+                Some(needle) => Self::search(&mut self.repo, source, reference, needle, &mut records)?,
+                None => source.resolve(&mut self.repo, reference, &mut records)?,
+            }
         }
 
         Ok(records)
+    }
+
+    /// Resolve a search's scope, then keep the records that match.
+    ///
+    /// Search is deliberately source-agnostic: the scope is an ordinary
+    /// reference, so `Q:1:"x"`, `B:2:"x"` and a user-defined `X:1:"x"` all work
+    /// through the same path, and a source only has to say how many items it
+    /// holds for the unscoped form to reach them.
+    ///
+    /// The scan is linear over the resolved scope. At Quran and hadith sizes —
+    /// 6236 ayat, 7277 hadiths — that is far cheaper than maintaining an
+    /// index, and it can never fall out of step with the text.
+    fn search(
+        repo: &mut Repository,
+        source: &dyn crate::Source,
+        reference: &Reference,
+        needle: &str,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        let mut scope = Reference {
+            text: None,
+            ..reference.clone()
+        };
+
+        // `Q:"text"` names no scope at all, so run the collection's whole
+        // flat axis. A source without one says so rather than searching a
+        // silently narrower slice.
+        if scope.primary.is_none() && scope.ranges.is_empty() {
+            let total = source.total(repo)?.ok_or_else(|| Error::Unsupported {
+                detail: format!(
+                    "{} cannot be searched whole; scope the search, as in {}:1:\"...\"",
+                    source.code(),
+                    source.code()
+                ),
+            })?;
+            scope.ranges = vec![Range { from: 1, to: total }];
+        }
+
+        let mut candidates = Vec::new();
+        source.resolve(repo, &scope, &mut candidates)?;
+
+        let folded = crate::search::fold(needle);
+        out.extend(candidates.into_iter().filter(|record| {
+            crate::search::matches(&record.ar, &folded)
+                || crate::search::matches(&record.en, &folded)
+        }));
+
+        Ok(())
     }
 
     /// Execute and build the response envelope. Never fails — errors are

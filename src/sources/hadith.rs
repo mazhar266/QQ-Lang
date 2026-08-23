@@ -111,6 +111,17 @@ impl Source for HadithCollection {
         self.name
     }
 
+    fn total(&self, repo: &mut Repository) -> Result<Option<u32>, Error> {
+        let relative = format!("{BOOK_DIR}/{}.json", self.dir);
+        let book: std::sync::Arc<BookFile> = repo.load(&relative)?;
+        u32::try_from(book.hadiths.len())
+            .map(Some)
+            .map_err(|_| Error::InvalidDataFile {
+                path: relative,
+                detail: "implausible hadith count".into(),
+            })
+    }
+
     fn resolve(
         &self,
         repo: &mut Repository,
