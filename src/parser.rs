@@ -128,9 +128,12 @@ impl<'a> Parser<'a> {
     /// this reference states one of its own.
     fn reference(&mut self, inherited: &mut Option<String>) -> Result<Vec<Reference>, Error> {
         let token = self.peek();
-        // A reference starts with a code, a number, or — for a bare `"text"`
-        // search — the term itself.
-        if !matches!(token.kind, Kind::Ident | Kind::Integer | Kind::Text) {
+        // A reference starts with a code, a number, or — for a bare search
+        // like `"text"`, `?"text"` or `*"text"` — the term itself.
+        if !matches!(
+            token.kind,
+            Kind::Ident | Kind::Integer | Kind::Text | Kind::Similar | Kind::FullText
+        ) {
             return Err(Error::ExpectedSource {
                 position: token.position,
             });

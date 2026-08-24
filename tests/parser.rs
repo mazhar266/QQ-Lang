@@ -309,6 +309,15 @@ fn search_terms_parse_as_scoped_references() {
     assert_eq!(search(r#"q:"Allah's""#).3, "Allah's");
     assert_eq!(search(r#"q:'say "this"'"#).3, r#"say "this""#);
 
+    // A bare term of any engine starts a reference — the source defaults just
+    // as it does for a bare number.
+    for query in [r#""mercy""#, r#"?"mercy""#, r#"*"mercy""#, "?'mercy'", "*'mercy'"] {
+        let parsed = parse(query).unwrap_or_else(|e| panic!("{query} should parse: {e}"));
+        assert_eq!(parsed.references.len(), 1, "{query}");
+        assert!(parsed.references[0].source.is_none(), "{query}");
+        assert_eq!(parsed.references[0].search.as_ref().unwrap().term, "mercy");
+    }
+
     // Terms are taken literally: spaces, colons and Arabic all survive.
     assert_eq!(search(r#"q:"a b:c-1""#).3, "a b:c-1");
     assert_eq!(search(r#"q:"الحمد""#).3, "الحمد");
