@@ -50,10 +50,6 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      # The index is generated, not committed.
-      - name: Build vector indexes
-        run: python3 scripts/build-vectors.py --source Q
-
       - name: Clippy
         run: cargo clippy --features vector --all-targets -- -D warnings
 
@@ -73,10 +69,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      # The indexes are generated, not committed.
-      - name: Build full-text indexes
-        run: cargo run --features fulltext --bin qql-index
-
+      # The indexes are committed, so the tests run against exactly what a
+      # checkout gets. A stale or unreadable index fails here rather than
+      # being papered over by a rebuild.
       - name: Clippy
         run: cargo clippy --features fulltext --all-targets -- -D warnings
 
@@ -98,9 +93,6 @@ jobs:
       # With the features, so the Dart tests exercise ranked search too.
       - name: Build the native library
         run: cargo build --release --features vector,fulltext
-
-      - name: Build full-text indexes
-        run: cargo run --features fulltext --bin qql-index
 
       - name: Analyze
         working-directory: bindings/dart

@@ -211,9 +211,17 @@ Arabic is indexed **folded** — the corpus is fully diacritized, and an index
 over raw tokens would only match a query reproducing every mark. English is
 indexed with tantivy's `en_stem` tokenizer.
 
-Indexing all eight sources takes about three seconds and 16 MB. Unlike the
-vector indexes these are **not** committed — a tantivy index is a directory of
-binary segments whose names change on every rebuild, so it is built locally.
+The indexes are committed, like the vector ones, so a checkout can search
+without a build step. Rebuild after changing text — about three seconds for
+all eight sources, 16 MB:
+
+```bash
+cargo run --features fulltext --bin qql-index
+```
+
+A rebuild replaces every segment file, since tantivy names them by UUID. That
+is a large diff each time, and each rebuild adds its own copy to git history —
+worth batching with other data changes rather than doing casually.
 
 ### Similarity search — optional
 

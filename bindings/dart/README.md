@@ -84,10 +84,10 @@ cargo build --release --features vector,fulltext
 cargo run --features fulltext --bin qql-index    # tantivy indexes (not committed)
 ```
 
-The vector indexes are committed, so `vector` needs no build step; the tantivy
-indexes are built locally. Both live under the data directory you pass to
-`Qql.open`, so ship `sources/vectors/` — and `sources/fulltext/` if you use it
-— alongside the text.
+Both index sets are committed, so neither feature needs a build step. They
+live under the data directory you pass to `Qql.open`, so ship
+`sources/vectors/` and `sources/fulltext/` alongside the text when you bundle
+the app.
 
 > Watch out: plain `cargo build --release` **overwrites** the library with a
 > featureless one, so anything that runs it (including `scripts/c-smoke.sh`)

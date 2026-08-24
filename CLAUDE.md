@@ -28,15 +28,15 @@ cargo run -- --sources
 cargo run -- --data tests/fixtures/custom "X:1:2"   # user-defined source
 ```
 
-Two optional search engines, both off by default. The vector indexes are
-committed; the tantivy ones are gitignored and built locally:
+Two optional search engines, both off by default. Both index sets are
+committed, so a checkout searches without a build step:
 
 ```bash
 python3 scripts/build-vectors.py                       # sources/vectors/*.qv  (committed, ~90 s, 21 MB)
 cargo test --features vector
 cargo run --features vector -- 'q:*"worship"~3'
 
-cargo run --features fulltext --bin qql-index          # sources/fulltext/*/   (~3 s, 16 MB)
+cargo run --features fulltext --bin qql-index          # sources/fulltext/*/   (committed, ~3 s, 16 MB)
 cargo test --features fulltext
 cargo run --features fulltext -- 'q:?"mercy"~5'
 ```
@@ -101,7 +101,7 @@ Consequences that are easy to get wrong:
 - 256 dims is the default for a reason: at 128 hash collisions outranked real matches on short queries (`q:1:` + a three-letter Arabic root). Measured, not guessed.
 - Similarity is **the only ranked output in QQL** — results are score-ordered and carry `score` + `"ranked": true`. Weak hits are cut at an absolute floor and at half the top score, so a search may return fewer than its cap.
 - Without the feature or without an index, a `*"…"` query returns `QQL_UNSUPPORTED`. It must never fall back to substring matching.
-- **Full-text search** is [src/fulltext.rs](src/fulltext.rs) behind the `fulltext` feature (tantivy). `?"term"` sets `MatchKind::FullText`; the `?` is lexed together with the quote, not as its own token. Indexes are `sources/fulltext/{CODE}/`, built by the `qql-index` binary (`required-features`), and **gitignored** — a tantivy index is a directory of binary segments that churn on rebuild. The `.qv` vector indexes next door *are* committed, since each is one deterministic file.
+- **Full-text search** is [src/fulltext.rs](src/fulltext.rs) behind the `fulltext` feature (tantivy). `?"term"` sets `MatchKind::FullText`; the `?` is lexed together with the quote, not as its own token. Indexes are `sources/fulltext/{CODE}/`, built by the `qql-index` binary (`required-features`), and **committed** alongside the `.qv` vector indexes, so a checkout searches with no build step. Only tantivy's `.tantivy-*.lock` files are ignored. A rebuild renames every segment (they are UUIDs), so it is a large diff and each one lands in history permanently — batch it with other data changes.
 - Three search spellings, three engines, chosen by the query and never by the build flags — `"term"` substring, `?"term"` tantivy, `*"term"` vectors. Two of them rank; `MatchKind::is_ranked()` is the one place that decides which.
 - `fulltext::build` enumerates records through `Context::execute("CODE:1")`, `"CODE:2"`… rather than any privileged access, so it cannot disagree with the resolver about numbering: the *n*-th record of a primary is item *n*. It tolerates 5 missing primaries before stopping, so a numbering gap does not silently truncate an index.
 - The tantivy index stores Arabic **folded** (`search::fold`) for the same reason vectors do, and English under `en_stem` — that stemmer is why `?"mercy"` finds *Merciful* where `"mercy"` cannot.
