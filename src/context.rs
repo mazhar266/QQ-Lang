@@ -154,7 +154,7 @@ impl Context {
         Ok(records)
     }
 
-    /// Resolve a similarity search — the `` `term` `` form.
+    /// Resolve a similarity search — the `*"term"` form.
     ///
     /// Without the `vector` feature this refuses the query outright. Falling
     /// back to substring matching would answer a different question than the

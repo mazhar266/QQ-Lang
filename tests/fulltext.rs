@@ -47,6 +47,12 @@ fn the_marked_form_always_parses() {
         r#""straight path""#
     );
 
+    // Either quote works after the marker, identically.
+    assert_eq!(
+        qql::parse(r#"q:1:?"mercy""#).unwrap(),
+        qql::parse("q:1:?'mercy'").unwrap()
+    );
+
     // A bare `?` is not a term.
     assert!(qql::parse("q:1:?").is_err());
 }

@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 104 Rust tests (128 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 106 Rust tests (130 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -43,9 +43,9 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | `;` | Separates references. Only needed to switch collection or start a new primary; a trailing one is optional. |
 | `::` | Skips the primary: `B::100` numbers across the whole collection. |
 | `"…"` / `'…'` | Full-text search within whatever the reference scopes. |
-| `~` | Scopes a search to an item range: `Q:1:3~5:"…"`, or caps results: ``Q:`…`~5``. |
-| `` `…` `` | Similarity search, ranked by score. Needs the `vector` feature. |
-| `?"…"` | Ranked full-text search with stemming. Needs the `fulltext` feature. |
+| `~` | Scopes a search to an item range: `Q:1:3~5:"…"`, or caps results: `Q:*"…"~5`. |
+| `*"…"` `*'…'` | Similarity search, ranked by score. Needs the `vector` feature. |
+| `?"…"` `?'…'` | Ranked full-text search with stemming. Needs the `fulltext` feature. |
 
 Whitespace around tokens is accepted: `Q : 2 : 1-5, 255;`
 
@@ -164,7 +164,7 @@ to fall out of step with the text. Sources that declare no book-wide axis
 | --- | --- | --- | --- |
 | `"term"` `'term'` | folded substring | positional | nothing |
 | `?"term"` | words, stemmed, BM25 | **ranked** | `fulltext` feature + index |
-| `` `term` `` | vector similarity | **ranked** | `vector` feature + index |
+| `*"term"` | vector similarity | **ranked** | `vector` feature + index |
 
 The spelling picks the engine, so a build flag never changes what a query
 means. Both optional engines are refused with `QQL_UNSUPPORTED` when their
@@ -217,7 +217,7 @@ binary segments whose names change on every rebuild, so it is built locally.
 
 ### Similarity search — optional
 
-Backticks ask for *similar* rather than *contains*. It is a cargo feature,
+A `*` in front asks for *similar* rather than *contains*. It is a cargo feature,
 **off by default**, so the core crate stays at two dependencies and needs no
 extra assets:
 
@@ -227,14 +227,14 @@ qql = { version = "0.1", features = ["vector"] }
 
 ```bash
 python3 scripts/build-vectors.py --source Q    # generates sources/vectors/Q.qv
-cargo run --features vector -- 'q:`worship`~3'
+cargo run --features vector -- 'q:*"worship"~3'
 ```
 
 ```text
-q:`worship`~3      top 3 across the Quran   → 109:2, 109:3, 109:4
-q:1:`worship`      within Surah 1           → 1:5
-q:1:3~5:`help`     within ayat 3–5          → 1:5
-q:1:`حمد`          undiacritized, no article → 1:2
+q:*"worship"~3      top 3 across the Quran   → 109:2, 109:3, 109:4
+q:1:*"worship"      within Surah 1           → 1:5
+q:1:3~5:*"help"     within ayat 3–5          → 1:5
+q:1:*"حمد"          undiacritized, no article → 1:2
 ```
 
 Hits are ordinary records with two fields added: `score` and `"ranked": true`.
@@ -243,7 +243,7 @@ than position** — everything else preserves the order written. `~N` caps the
 result count (default 20), and weak matches are dropped, so a search can
 return fewer than the cap or nothing at all.
 
-Without the feature, or without an index for that source, a backtick query is
+Without the feature, or without an index for that source, a `*"…"` query is
 **refused** with `QQL_UNSUPPORTED` naming the fix. It never silently falls
 back to substring matching — answering a different question than the one asked
 is worse than saying no.

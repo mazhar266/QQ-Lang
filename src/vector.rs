@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Mazhar Ahmed
 
-//! Vector similarity search — the `` `term` `` form.
+//! Vector similarity search — the `*"term"` form.
 //!
 //! Behind the `vector` cargo feature, off by default, so the core crate keeps
 //! its two dependencies and needs no vector assets to build or run.

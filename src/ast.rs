@@ -39,7 +39,7 @@ pub struct Reference {
     ///
     /// For a search this is the `3~5` scope rather than a selection.
     pub ranges: Vec<Range>,
-    /// Search, for `Q:1:"text"` or ``Q:1:`text` ``. `None` is an ordinary
+    /// Search, for `Q:1:"text"` or `Q:1:*"text"`. `None` is an ordinary
     /// reference.
     ///
     /// When set, `primary` and `ranges` narrow *where* to search rather than
@@ -53,7 +53,7 @@ pub struct Reference {
 pub enum MatchKind {
     /// `"term"` or `'term'` — folded substring, exact and positional.
     Exact,
-    /// `` `term` `` — vector similarity, ranked by score.
+    /// `*"term"` — vector similarity, ranked by score.
     ///
     /// Needs the `vector` feature and a built index; without either, the query
     /// is refused rather than silently downgraded to [`MatchKind::Exact`].

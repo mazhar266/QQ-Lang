@@ -152,7 +152,7 @@ void main() {
   /// how the native library was built. Both outcomes are correct — what must
   /// not happen is a silent fallback to substring matching.
   test('ranked search either works or says it is unavailable', () {
-    for (final query in ['q:1:?"mercy"', 'q:1:`worship`']) {
+    for (final query in ['q:1:?"mercy"', 'q:1:*"worship"']) {
       try {
         final hits = qql.execute(query);
         expect(hits, isNotEmpty, reason: '$query returned nothing');

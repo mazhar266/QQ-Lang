@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Mazhar Ahmed
-"""Build the vector indexes QQL's `` `term` `` search reads.
+"""Build the vector indexes QQL's `*"term"` search reads.
 
 One `.qv` file per source, written to `sources/vectors/{CODE}.qv`. Nothing
 here is needed unless the `vector` cargo feature is on.

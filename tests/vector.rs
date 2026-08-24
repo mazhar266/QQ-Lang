@@ -21,18 +21,24 @@ fn context() -> Option<Context> {
         .then(|| Context::new(DATA))
 }
 
-/// The backtick form parses whether or not the feature is compiled in — the
+/// The `*"…"` form parses whether or not the feature is compiled in — the
 /// grammar is the same either way, only the execution differs.
 #[test]
-fn the_backtick_form_always_parses() {
-    let query = qql::parse("q:1:`mercy`").unwrap();
+fn the_similarity_form_always_parses() {
+    let query = qql::parse(r#"q:1:*"mercy""#).unwrap();
     let search = query.references[0].search.as_ref().unwrap();
     assert_eq!(search.term, "mercy");
     assert_eq!(search.kind, qql::MatchKind::Similar);
     assert_eq!(search.limit, None);
 
-    let query = qql::parse("q:`mercy`~5").unwrap();
+    let query = qql::parse(r#"q:*"mercy"~5"#).unwrap();
     assert_eq!(query.references[0].search.as_ref().unwrap().limit, Some(5));
+
+    // Either quote works after the marker, identically.
+    assert_eq!(
+        qql::parse(r#"q:1:*"mercy""#).unwrap(),
+        qql::parse("q:1:*'mercy'").unwrap()
+    );
 
     // `~N` ranks, so it is meaningless on an exact term and rejected there.
     assert_eq!(
@@ -51,7 +57,7 @@ mod without_the_feature {
     fn similarity_is_refused_with_a_message_that_says_why() {
         let Some(mut ctx) = context() else { return };
 
-        let error = ctx.execute("q:1:`mercy`").unwrap_err();
+        let error = ctx.execute(r#"q:1:*"mercy""#).unwrap_err();
         assert_eq!(error.code(), "QQL_UNSUPPORTED");
         assert!(
             error.to_string().contains("vector"),
@@ -92,7 +98,7 @@ mod with_the_feature {
         let mut ctx = ctx!();
 
         // Al-Kafirun is where worship is discussed most densely.
-        let hits = ctx.execute("q:`worship`~3").unwrap();
+        let hits = ctx.execute(r#"q:*"worship"~3"#).unwrap();
         assert!(!hits.is_empty());
         assert_eq!(hits[0].extra["surah"], 109);
 
@@ -107,7 +113,7 @@ mod with_the_feature {
     fn results_are_ordered_by_score_descending() {
         let mut ctx = ctx!();
         let scores: Vec<f64> = ctx
-            .execute("q:`mercy`~10")
+            .execute(r#"q:*"mercy"~10"#)
             .unwrap()
             .iter()
             .map(|r| r.extra["score"].as_f64().unwrap())
@@ -124,12 +130,12 @@ mod with_the_feature {
     fn the_scope_narrows_the_search() {
         let mut ctx = ctx!();
 
-        let surah = ctx.execute("q:1:`worship`").unwrap();
+        let surah = ctx.execute(r#"q:1:*"worship""#).unwrap();
         assert!(surah.iter().all(|r| r.extra["surah"] == 1));
         assert_eq!(surah[0].extra["ayah"], 5);
 
         // An ayah range inside that Surah.
-        let ranged = ctx.execute("q:1:3~5:`help`").unwrap();
+        let ranged = ctx.execute(r#"q:1:3~5:*"help""#).unwrap();
         assert!(ranged
             .iter()
             .all(|r| r.extra["ayah"].as_u64().unwrap() >= 3
@@ -143,21 +149,21 @@ mod with_the_feature {
     fn arabic_matches_without_diacritics_or_the_article() {
         let mut ctx = ctx!();
 
-        let hits = ctx.execute("q:1:`حمد`").unwrap();
+        let hits = ctx.execute(r#"q:1:*"حمد""#).unwrap();
         assert_eq!(hits[0].extra["ayah"], 2, "got {hits:?}");
     }
 
     #[test]
     fn the_limit_caps_the_result_count() {
         let mut ctx = ctx!();
-        assert!(ctx.execute("q:`mercy`~3").unwrap().len() <= 3);
-        assert!(ctx.execute("q:`mercy`~1").unwrap().len() <= 1);
+        assert!(ctx.execute(r#"q:*"mercy"~3"#).unwrap().len() <= 3);
+        assert!(ctx.execute(r#"q:*"mercy"~1"#).unwrap().len() <= 1);
     }
 
     #[test]
     fn hits_are_ordinary_records() {
         let mut ctx = ctx!();
-        let hit = &ctx.execute("q:1:`worship`").unwrap()[0];
+        let hit = &ctx.execute(r#"q:1:*"worship""#).unwrap()[0];
 
         // Same shape and same text as addressing the ayah directly.
         let direct = &ctx.execute("q:1:5").unwrap()[0];
@@ -173,7 +179,7 @@ mod with_the_feature {
     fn a_source_without_an_index_says_so() {
         let mut ctx = Context::new("tests/fixtures/custom");
 
-        let error = ctx.execute("x:1:`opening`").unwrap_err();
+        let error = ctx.execute(r#"x:1:*"opening""#).unwrap_err();
         assert_eq!(error.code(), "QQL_UNSUPPORTED");
         assert!(
             error.to_string().contains("build-vectors"),
@@ -187,7 +193,7 @@ mod with_the_feature {
     #[test]
     fn similarity_mixes_with_ordinary_references() {
         let mut ctx = ctx!();
-        let records = ctx.execute("q:1:1;q:1:`worship`~1").unwrap();
+        let records = ctx.execute(r#"q:1:1;q:1:*"worship"~1"#).unwrap();
 
         assert_eq!(records.len(), 2);
         assert!(records[0].extra.get("ranked").is_none());

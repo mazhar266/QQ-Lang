@@ -66,7 +66,7 @@ qql.execute('q:1:"الحمد"');    // Arabic, exact
 qql.execute('q:2:"prayer"');   // English, exact
 qql.execute("q:1:'الحمد'");    // either quote delimits a term
 qql.execute('q:1:?"mercy"');   // ranked full text  (fulltext feature)
-qql.execute('q:1:`worship`');  // ranked similarity (vector feature)
+qql.execute('q:1:*"worship"');  // ranked similarity (vector feature)
 ```
 
 Ranked hits carry two extra fields, `score` and `ranked: true`, and come back
@@ -75,7 +75,7 @@ ordered by score rather than by position — the only QQL results that do.
 ## Optional search engines
 
 **The feature set is compiled into the shared library**, not chosen from Dart.
-A `libqql.so` built without them answers `?"…"` and `` `…` `` with
+A `libqql.so` built without them answers `?"…"` and `*"…"` with
 `QqlException('QQL_UNSUPPORTED')`, and it never silently falls back to
 substring matching.
 

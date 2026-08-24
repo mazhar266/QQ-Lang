@@ -21,13 +21,15 @@
 //! scope     := integer '~' integer
 //! selector  := item (',' item)*
 //! item      := integer | integer '-' integer
-//! text      := quoted | '`' ... '`' ('~' integer)? | '?' quoted ('~' integer)?
+//! text      := quoted                        exact substring
+//!            | '*' quoted ('~' integer)?    similarity, optionally capped
+//!            | '?' quoted ('~' integer)?    full text, optionally capped
 //! quoted    := '"' ... '"' | "'" ... "'"
 //! ```
 //!
-//! Quotes match exactly; backticks ask for similarity; `?` in front asks for
-//! ranked full-text search. The two ranked forms may carry a trailing `~N`
-//! cap: `` Q:1:`mercy`~5 ``, `Q:1:?"mercy"~5`.
+//! A marker in front of the quote picks the engine: none means exact, `?`
+//! means ranked full text, `*` means similarity. The two ranked forms may
+//! carry a trailing `~N` cap — `Q:1:*"mercy"~5`, `Q:1:?"mercy"~5`.
 //!
 //! One rule resolves the only ambiguity: **an integer followed by `:` starts a
 //! new group** rather than continuing the current selector. So in

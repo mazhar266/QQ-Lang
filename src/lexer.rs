@@ -25,11 +25,11 @@ pub enum Kind {
     Dash,
     /// `~`, which opens the item range of a search scope.
     Tilde,
-    /// A quoted search term, written with `"` or `'`. `text` is the content,
-    /// without the quotes.
+    /// A quoted search term with no marker, matched as an exact substring.
+    /// `text` is the content, without the quotes.
     Text,
-    /// A backtick-quoted term, which asks for similarity rather than an exact
-    /// match. `text` is the content, without the backticks.
+    /// A term marked `*`, which asks for similarity rather than an exact
+    /// match. `text` is the content, without the marker or the quotes.
     Similar,
     /// A quoted term prefixed with `?`, which asks for ranked full-text
     /// search. `text` is the content, without the marker or the quotes.
@@ -73,14 +73,24 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
         // always be written with the other — `'Allah\'s'` would end early,
         // `"Allah's"` does not.
         //
-        // Both quotes are ASCII and so cannot occur inside a multi-byte
-        // sequence, making this byte scan safe for any UTF-8 content.
-        // `?` only ever introduces a quoted term, so it is read together with
-        // the quote rather than as a token of its own.
-        let full_text = b == b'?' && matches!(bytes.get(i + 1), Some(b'"' | b'\'' | b'`'));
-        if full_text || b == b'"' || b == b'\'' || b == b'`' {
+        // Markers and quotes are all ASCII and so cannot occur inside a
+        // multi-byte sequence, making this byte scan safe for any UTF-8.
+        // A marker in front of the quote picks the engine, and is read
+        // together with it rather than as a token of its own:
+        //
+        //     "term"    exact substring
+        //     ?"term"   ranked full text
+        //     *"term"   vector similarity
+        //
+        // A marker only marks when a quote follows, so `Q:2*3` stays the
+        // invalid character it always was.
+        let marker = match b {
+            b'?' | b'*' if matches!(bytes.get(i + 1), Some(b'"' | b'\'')) => Some(b),
+            _ => None,
+        };
+        if marker.is_some() || b == b'"' || b == b'\'' {
             let open = i;
-            if full_text {
+            if marker.is_some() {
                 i += 1;
             }
             let quote = bytes[i];
@@ -91,14 +101,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
             if i == bytes.len() {
                 return Err(Error::UnterminatedText { position: open });
             }
-            let kind = if full_text {
-                Kind::FullText
-            } else if quote == b'`' {
-                Kind::Similar
-            } else {
-                Kind::Text
+            let kind = match marker {
+                Some(b'?') => Kind::FullText,
+                Some(_) => Kind::Similar,
+                None => Kind::Text,
             };
-            let from = if full_text { open + 2 } else { open + 1 };
+            let from = if marker.is_some() { open + 2 } else { open + 1 };
             tokens.push(Token {
                 kind,
                 text: &input[from..i],
@@ -209,6 +217,32 @@ mod tests {
         match tokenize("Q:2*3") {
             Err(Error::InvalidCharacter { position }) => assert_eq!(position, 3),
             other => panic!("expected InvalidCharacter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_marker_before_the_quote_picks_the_engine() {
+        let kind = |q: &str| tokenize(q).unwrap()[2].kind;
+        assert_eq!(kind(r#"q:"t""#), Kind::Text);
+        assert_eq!(kind(r#"q:?"t""#), Kind::FullText);
+        assert_eq!(kind(r#"q:*"t""#), Kind::Similar);
+        assert_eq!(kind("q:*'t'"), Kind::Similar);
+
+        // The marker is not part of the term, but the token starts at it.
+        let tokens = tokenize(r#"q:*"text""#).unwrap();
+        assert_eq!(tokens[2].text, "text");
+        assert_eq!(tokens[2].position, 2);
+    }
+
+    /// A marker only marks when a quote follows, so arithmetic-looking junk
+    /// and the old backtick stay the errors they were.
+    #[test]
+    fn a_bare_marker_is_still_an_invalid_character() {
+        for query in ["Q:2*3", "Q:2?3", "Q:1:`x`", "*"] {
+            assert!(
+                matches!(tokenize(query), Err(Error::InvalidCharacter { .. })),
+                "{query} should be rejected"
+            );
         }
     }
 

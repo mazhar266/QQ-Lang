@@ -33,7 +33,7 @@ void main(List<String> args) {
     }
 
     // Search is part of the query string — no extra API.
-    for (final query in ['q:1:"الحمد"', 'q:1:?"mercy"', 'q:1:`worship`']) {
+    for (final query in ['q:1:"الحمد"', 'q:1:?"mercy"', 'q:1:*"worship"']) {
       try {
         final hits = qql.execute(query);
         final score = hits.isNotEmpty && hits.first.containsKey('score')
