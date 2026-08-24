@@ -1,0 +1,77 @@
+name: Release
+
+# Cut a release by pushing a version tag from a green main:
+#
+#     git tag v3.0.0 && git push origin v3.0.0
+#
+# Each job builds the CLI and libraries with both search features, stages a
+# self-contained bundle (binaries + libqql + header + the data the resolvers
+# read, indexes included), smoke-tests that bundle against its own data, and
+# uploads it to the GitHub release for the tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: x86_64-linux,   archive: tar }
+          - { os: macos-latest,   name: aarch64-macos,  archive: tar }
+          - { os: macos-13,       name: x86_64-macos,   archive: tar }
+          - { os: windows-latest, name: x86_64-windows, archive: zip }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # A v3.0.0 tag must not ship a binary that reports 3.1.0.
+      - name: Tag matches Cargo.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$tag\"" Cargo.toml \
+            || { echo "tag v$tag != Cargo.toml version"; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --features vector,fulltext
+
+      # Stages dist/<name>/ and smoke-tests the staged binary against the
+      # staged data — a bundle that cannot answer Q:1:1 never ships.
+      - name: Package
+        run: scripts/package.sh "qql-${GITHUB_REF_NAME}-${{ matrix.name }}"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar'
+        run: |
+          cd dist
+          tar czf "qql-${GITHUB_REF_NAME}-${{ matrix.name }}.tar.gz" \
+                  "qql-${GITHUB_REF_NAME}-${{ matrix.name }}"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        run: |
+          cd dist
+          7z a -bso0 "qql-${GITHUB_REF_NAME}-${{ matrix.name }}.zip" \
+                     "qql-${GITHUB_REF_NAME}-${{ matrix.name }}"
+
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+          generate_release_notes: true

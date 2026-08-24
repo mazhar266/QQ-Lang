@@ -44,6 +44,8 @@ cargo run --features fulltext -- 'q:?"mercy"~5'
 Test every combination when touching search: default, `--features vector`,
 `--features fulltext`, `--features vector,fulltext`.
 
+Releasing: push a tag from a green main — `git tag v3.0.0 && git push origin v3.0.0`. [.github/workflows/release.yml](.github/workflows/release.yml) builds self-contained bundles (CLI + libraries + header + data + indexes) for Linux, macOS (both arches) and Windows via `scripts/package.sh`, smoke-tests each bundle against its own data, and attaches them to the GitHub release. The tag must match `Cargo.toml`'s version or the job refuses.
+
 FFI and parser work:
 
 ```bash
@@ -65,9 +67,7 @@ the ranked engines then answer `QQL_UNSUPPORTED` through Dart and C until it
 is rebuilt with the flags. The Dart test for ranked search accepts either
 outcome for that reason; what it forbids is a silent fallback.
 
-Note: `cargo fmt`, `cargo clippy`, doctests, cargo-fuzz, and Miri do **not** run in this environment — no rustup, clippy is not installed, `rustdoc` fails to load `libLLVM`. Use `cargo test --lib --bins --tests` to skip doctests. They still run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) and remain the contract.
-
-`scripts/c-smoke.sh`, `gcc`, and `dart` **do** work here — use them to verify anything FFI-related.
+Rustup (stable + rustfmt + clippy) is installed, so `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and doctests all run locally — run fmt and clippy before pushing, since CI enforces them. Miri and cargo-fuzz still need nightly, which is not installed; they run in CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)). `scripts/c-smoke.sh`, `gcc`, and `dart` work here too.
 
 ## Architecture
 

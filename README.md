@@ -27,7 +27,7 @@ scope      := integer '~' integer
 selector   := item (',' item)*
 item       := integer | integer '-' integer
 text       := quoted                          exact substring
-            | '`' ... '`' ('~' integer)?     similarity, optionally capped
+            | '*' quoted ('~' integer)?      similarity, optionally capped
             | '?' quoted ('~' integer)?      full text, optionally capped
 quoted     := '"' ... '"' | "'" ... "'"
 source     := [A-Za-z][A-Za-z0-9_]*
@@ -42,7 +42,7 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | `,` | Joins items, and joins groups: `1:2,3,2:5` |
 | `;` | Separates references. Only needed to switch collection or start a new primary; a trailing one is optional. |
 | `::` | Skips the primary: `B::100` numbers across the whole collection. |
-| `"…"` / `'…'` | Full-text search within whatever the reference scopes. |
+| `"…"` / `'…'` | Exact-substring search within whatever the reference scopes. |
 | `~` | Scopes a search to an item range: `Q:1:3~5:"…"`, or caps results: `Q:*"…"~5`. |
 | `*"…"` `*'…'` | Similarity search, ranked by score. Needs the `vector` feature. |
 | `?"…"` `?'…'` | Ranked full-text search with stemming. Needs the `fulltext` feature. |
@@ -163,8 +163,8 @@ to fall out of step with the text. Sources that declare no book-wide axis
 | Form | Matches | Order | Needs |
 | --- | --- | --- | --- |
 | `"term"` `'term'` | folded substring | positional | nothing |
-| `?"term"` | words, stemmed, BM25 | **ranked** | `fulltext` feature + index |
-| `*"term"` | vector similarity | **ranked** | `vector` feature + index |
+| `?"term"` `?'term'` | words, stemmed, BM25 | **ranked** | `fulltext` feature + index |
+| `*"term"` `*'term'` | vector similarity | **ranked** | `vector` feature + index |
 
 The spelling picks the engine, so a build flag never changes what a query
 means. Both optional engines are refused with `QQL_UNSUPPORTED` when their
@@ -380,6 +380,21 @@ cargo clippy --all-targets -- -D warnings
 cargo +nightly miri test --test ffi     # after touching src/ffi.rs
 cargo +nightly fuzz run parse           # the parser must never panic
 ```
+
+## Releases
+
+Tagged releases ship self-contained bundles per platform — the `qql` CLI,
+`qql-index`, the C libraries and header, and all data and search indexes.
+Extract and run; no build, no setup:
+
+```bash
+tar xzf qql-v3.0.0-x86_64-linux.tar.gz
+cd qql-v3.0.0-x86_64-linux
+./qql 'Q:2:255'
+./qql 'q:1:?"mercy"~5'        # both search engines included
+```
+
+Maintainers cut one by pushing a matching tag: `git tag v3.0.0 && git push origin v3.0.0`.
 
 ## CLI
 
