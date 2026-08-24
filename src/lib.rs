@@ -67,5 +67,5 @@ pub use registry::Registry;
 pub use repo::Repository;
 pub use sources::{HadithCollection, HisnulMuslim, JsonSource, Quran, Source, SourceSpec};
 
-/// Crate version, e.g. `"0.1.0"`.
+/// Crate version, e.g. `"3.0.0"`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
