@@ -7,7 +7,9 @@ use qql::{parse, Error, Range};
 
 /// `(source, primary, ranges)`. An empty source string means the query left
 /// the code out, which the registry fills in at resolve time.
-fn refs(query: &str) -> Vec<(String, Option<u32>, Vec<(u32, u32)>)> {
+type Ref = (String, Option<u32>, Vec<(u32, u32)>);
+
+fn refs(query: &str) -> Vec<Ref> {
     parse(query)
         .unwrap()
         .references
@@ -82,7 +84,10 @@ fn other_sources_parse_without_the_parser_knowing_them() {
     // Unknown to the registry, but syntactically fine — §35.
     assert_eq!(refs("XYZ:1:2"), [("XYZ".into(), Some(1), vec![(2, 2)])]);
     // Out of range for the Quran, but the parser has no idea.
-    assert_eq!(refs("Q:500:999"), [("Q".into(), Some(500), vec![(999, 999)])]);
+    assert_eq!(
+        refs("Q:500:999"),
+        [("Q".into(), Some(500), vec![(999, 999)])]
+    );
 }
 
 /// `B::100` skips the chapter and numbers across the whole collection.
@@ -233,10 +238,13 @@ fn the_source_may_be_omitted() {
     );
 
     // Inheritance never turns a bare number into the flat `::` form.
-    assert_eq!(refs("b::100;3"), [
-        ("B".into(), None, vec![(100, 100)]),
-        ("B".into(), Some(3), vec![]),
-    ]);
+    assert_eq!(
+        refs("b::100;3"),
+        [
+            ("B".into(), None, vec![(100, 100)]),
+            ("B".into(), Some(3), vec![]),
+        ]
+    );
 
     assert_eq!(refs(" 1 , 2 : 255 "), refs("1,2:255"));
 }
@@ -281,7 +289,10 @@ fn search_terms_parse_as_scoped_references() {
         ("Q".into(), None, vec![], "text".into())
     );
     // Bare term — no code stated, so the registry's default applies.
-    assert_eq!(search(r#""text""#), ("".into(), None, vec![], "text".into()));
+    assert_eq!(
+        search(r#""text""#),
+        ("".into(), None, vec![], "text".into())
+    );
     // Within a primary.
     assert_eq!(
         search(r#"q:1:"text""#),
@@ -311,7 +322,13 @@ fn search_terms_parse_as_scoped_references() {
 
     // A bare term of any engine starts a reference — the source defaults just
     // as it does for a bare number.
-    for query in [r#""mercy""#, r#"?"mercy""#, r#"*"mercy""#, "?'mercy'", "*'mercy'"] {
+    for query in [
+        r#""mercy""#,
+        r#"?"mercy""#,
+        r#"*"mercy""#,
+        "?'mercy'",
+        "*'mercy'",
+    ] {
         let parsed = parse(query).unwrap_or_else(|e| panic!("{query} should parse: {e}"));
         assert_eq!(parsed.references.len(), 1, "{query}");
         assert!(parsed.references[0].source.is_none(), "{query}");
@@ -383,8 +400,30 @@ fn invalid_queries() {
 #[test]
 fn parsing_never_panics_on_garbage() {
     let alphabet = [
-        "", "Q", "q", "HM", ":", ";", ",", "-", "~", "\"", "\"a\"", "'", "'a'", "0", "1", "9",
-        "4294967295", "99999999999999999999", " ", "\t", "*", "\u{0}", "٢", "🕋",
+        "",
+        "Q",
+        "q",
+        "HM",
+        ":",
+        ";",
+        ",",
+        "-",
+        "~",
+        "\"",
+        "\"a\"",
+        "'",
+        "'a'",
+        "0",
+        "1",
+        "9",
+        "4294967295",
+        "99999999999999999999",
+        " ",
+        "\t",
+        "*",
+        "\u{0}",
+        "٢",
+        "🕋",
         "\u{200b}",
     ];
 

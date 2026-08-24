@@ -74,7 +74,10 @@ fn returned_strings_outlive_their_context() {
     // Destroy first, read after — the string is independently owned.
     unsafe { qql_context_destroy(ctx) };
 
-    let text = unsafe { CStr::from_ptr(result) }.to_str().unwrap().to_owned();
+    let text = unsafe { CStr::from_ptr(result) }
+        .to_str()
+        .unwrap()
+        .to_owned();
     assert!(text.contains("\"ok\":true"));
     unsafe { qql_free_string(result) };
 }

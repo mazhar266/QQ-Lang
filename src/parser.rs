@@ -160,7 +160,10 @@ impl<'a> Parser<'a> {
         let mut references = Vec::new();
 
         // `Q:"text"` — search the whole collection.
-        if matches!(self.peek().kind, Kind::Text | Kind::Similar | Kind::FullText) {
+        if matches!(
+            self.peek().kind,
+            Kind::Text | Kind::Similar | Kind::FullText
+        ) {
             return Ok(vec![self.search(source, None, Vec::new())?]);
         }
 
@@ -184,7 +187,10 @@ impl<'a> Parser<'a> {
 
             let ranges = if self.eat(Kind::Colon) {
                 // `Q:1:"text"` — search inside this primary.
-                if matches!(self.peek().kind, Kind::Text | Kind::Similar | Kind::FullText) {
+                if matches!(
+                    self.peek().kind,
+                    Kind::Text | Kind::Similar | Kind::FullText
+                ) {
                     references.push(self.search(source, Some(primary), Vec::new())?);
                     break;
                 }

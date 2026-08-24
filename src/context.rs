@@ -137,9 +137,13 @@ impl Context {
 
             match &reference.search {
                 Some(search) => match search.kind {
-                    MatchKind::Exact => {
-                        Self::exact(&mut self.repo, source, reference, &search.term, &mut records)?
-                    }
+                    MatchKind::Exact => Self::exact(
+                        &mut self.repo,
+                        source,
+                        reference,
+                        &search.term,
+                        &mut records,
+                    )?,
                     MatchKind::Similar => {
                         Self::similar(&mut self.repo, source, reference, search, &mut records)?
                     }
@@ -242,9 +246,7 @@ impl Context {
             )?;
 
             for mut record in found {
-                record
-                    .extra
-                    .insert("score".to_string(), score_value(score));
+                record.extra.insert("score".to_string(), score_value(score));
                 record
                     .extra
                     .insert("ranked".to_string(), serde_json::Value::Bool(true));
@@ -288,19 +290,18 @@ impl Context {
 
         let data = repo.root().to_path_buf();
         let code = source.code().to_string();
-        let searcher: Arc<Searcher> = match repo.cached(&format!("fulltext/{code}"), || {
-            Searcher::open(&data, &code)
-        }) {
-            Ok(searcher) => searcher,
-            Err(Error::DataFileNotFound { .. }) => {
-                return Err(Error::Unsupported {
-                    detail: format!(
+        let searcher: Arc<Searcher> =
+            match repo.cached(&format!("fulltext/{code}"), || Searcher::open(&data, &code)) {
+                Ok(searcher) => searcher,
+                Err(Error::DataFileNotFound { .. }) => {
+                    return Err(Error::Unsupported {
+                        detail: format!(
                         "no full-text index for {code}; build one with `qql-index --source {code}`"
                     ),
-                })
-            }
-            Err(other) => return Err(other),
-        };
+                    })
+                }
+                Err(other) => return Err(other),
+            };
 
         let limit = search.limit.unwrap_or(DEFAULT_LIMIT);
         let hits = searcher.search(

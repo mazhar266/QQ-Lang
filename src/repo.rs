@@ -87,7 +87,8 @@ impl Repository {
                 })?,
             );
 
-        self.cache.insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
+        self.cache
+            .insert(path, Arc::clone(&value) as Arc<dyn Any + Send + Sync>);
         Ok(value)
     }
 
@@ -97,7 +98,11 @@ impl Repository {
     /// decodes UTF-8 and strips a BOM, both wrong for a vector index. This
     /// keeps the same cache and the same lazy-load contract, and leaves the
     /// bytes untouched.
-    pub fn load_bytes_with<T, F>(&mut self, relative: impl AsRef<Path>, build: F) -> Result<Arc<T>, Error>
+    pub fn load_bytes_with<T, F>(
+        &mut self,
+        relative: impl AsRef<Path>,
+        build: F,
+    ) -> Result<Arc<T>, Error>
     where
         T: Send + Sync + 'static,
         F: FnOnce(&[u8]) -> Result<T, Error>,

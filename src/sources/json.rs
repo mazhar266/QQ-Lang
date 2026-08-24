@@ -234,9 +234,7 @@ impl Source for JsonSource {
                         detail: format!("no array at '{chapters}'"),
                     })?;
                 list.iter()
-                    .find(|c| {
-                        at(c, id_field).and_then(Value::as_u64) == Some(u64::from(primary))
-                    })
+                    .find(|c| at(c, id_field).and_then(Value::as_u64) == Some(u64::from(primary)))
                     .ok_or_else(|| Error::ReferenceNotFound {
                         detail: format!("{}:{primary} (no such chapter)", self.spec.code),
                     })?

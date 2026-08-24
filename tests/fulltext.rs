@@ -162,8 +162,14 @@ mod with_the_feature {
     fn boolean_and_phrase_syntax_reach_the_engine() {
         let mut ctx = ctx!();
 
-        assert!(!ctx.execute(r#"q:?"mercy OR forgiveness"~3"#).unwrap().is_empty());
-        assert!(!ctx.execute(r#"q:?"prayer AND charity"~3"#).unwrap().is_empty());
+        assert!(!ctx
+            .execute(r#"q:?"mercy OR forgiveness"~3"#)
+            .unwrap()
+            .is_empty());
+        assert!(!ctx
+            .execute(r#"q:?"prayer AND charity"~3"#)
+            .unwrap()
+            .is_empty());
 
         // A phrase needs the inner quotes, so the term takes the other quote.
         let phrase = ctx.execute(r#"q:?'"straight path"'~3"#).unwrap();
@@ -215,7 +221,7 @@ mod with_the_feature {
         let records = ctx.execute(r#"q:1:1;q:1:?"help"~1"#).unwrap();
 
         assert_eq!(records.len(), 2);
-        assert!(records[0].extra.get("ranked").is_none());
+        assert!(!records[0].extra.contains_key("ranked"));
         assert_eq!(records[1].extra["ranked"], true);
     }
 }

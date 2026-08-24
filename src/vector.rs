@@ -143,10 +143,18 @@ impl Index {
         }
 
         let keys_end = HEADER
-            .checked_add(count.checked_mul(KEY).ok_or_else(|| bad("index too large"))?)
+            .checked_add(
+                count
+                    .checked_mul(KEY)
+                    .ok_or_else(|| bad("index too large"))?,
+            )
             .ok_or_else(|| bad("index too large"))?;
         let vectors_end = keys_end
-            .checked_add(count.checked_mul(dims).ok_or_else(|| bad("index too large"))?)
+            .checked_add(
+                count
+                    .checked_mul(dims)
+                    .ok_or_else(|| bad("index too large"))?,
+            )
             .ok_or_else(|| bad("index too large"))?;
 
         if bytes.len() < vectors_end {
@@ -274,7 +282,7 @@ fn dot(a: &[i8], b: &[i8]) -> f32 {
     for (x, y) in a.iter().zip(b.iter()) {
         sum += i32::from(*x) * i32::from(*y);
     }
-    f32::from(sum as i16 as i16).mul_add(0.0, sum as f32) / (127.0 * 127.0)
+    sum as f32 / (127.0 * 127.0)
 }
 
 /// Split text into the tokens the hashed embedder projects.

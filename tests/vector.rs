@@ -196,7 +196,7 @@ mod with_the_feature {
         let records = ctx.execute(r#"q:1:1;q:1:*"worship"~1"#).unwrap();
 
         assert_eq!(records.len(), 2);
-        assert!(records[0].extra.get("ranked").is_none());
+        assert!(!records[0].extra.contains_key("ranked"));
         assert_eq!(records[1].extra["ranked"], true);
     }
 }

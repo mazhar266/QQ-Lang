@@ -46,17 +46,17 @@ mod ast;
 mod context;
 mod error;
 pub mod ffi;
+#[cfg(feature = "fulltext")]
+pub mod fulltext;
 mod lexer;
 mod parser;
 mod record;
 mod registry;
 mod repo;
 mod search;
-#[cfg(feature = "fulltext")]
-pub mod fulltext;
+mod sources;
 #[cfg(feature = "vector")]
 pub mod vector;
-mod sources;
 
 pub use ast::{MatchKind, Query, Range, Reference, Search};
 pub use context::Context;

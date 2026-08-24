@@ -288,7 +288,9 @@ fn search_covers_arabic_and_english_alike() {
     // English only appears in `en`.
     let english = ctx.execute(r#"q:1:"Allah""#).unwrap();
     assert_eq!(english.len(), 2);
-    assert!(english.iter().all(|r| r.en.to_lowercase().contains("allah")));
+    assert!(english
+        .iter()
+        .all(|r| r.en.to_lowercase().contains("allah")));
 
     // Arabic only appears in `ar`.
     let arabic = ctx.execute(r#"q:1:"الحمد""#).unwrap();
@@ -340,7 +342,10 @@ fn search_folds_arabic_diacritics() {
     // Folding is for comparison only — the record keeps its marks.
     let hit = &ctx.execute(r#"q:1:"الحمد""#).unwrap()[0];
     assert_eq!(hit.ar, ctx.execute("q:1:2").unwrap()[0].ar);
-    assert!(hit.ar.contains('\u{064E}'), "diacritics were stripped from output");
+    assert!(
+        hit.ar.contains('\u{064E}'),
+        "diacritics were stripped from output"
+    );
 }
 
 /// Search is source-agnostic: it filters whatever the scope resolves to.
@@ -493,7 +498,10 @@ fn hisnul_survives_the_upstream_data_quirks() {
 
     // HM:132:1 spells its Arabic key `Text` rather than `ARABIC_TEXT`.
     let record = &ctx.execute("HM:132:1").unwrap()[0];
-    assert!(!record.ar.is_empty(), "the `Text` key fallback should apply");
+    assert!(
+        !record.ar.is_empty(),
+        "the `Text` key fallback should apply"
+    );
 }
 
 #[test]
@@ -579,7 +587,10 @@ fn flat_numbering_works_for_quran_and_hisnul_muslim() {
     assert_eq!(dua.extra["number"], 75);
     assert_eq!(dua.ar, ctx.execute("HM:27:1").unwrap()[0].ar);
 
-    assert_eq!(ctx.execute("Q::1").unwrap()[0].ar, ctx.execute("Q:1:1").unwrap()[0].ar);
+    assert_eq!(
+        ctx.execute("Q::1").unwrap()[0].ar,
+        ctx.execute("Q:1:1").unwrap()[0].ar
+    );
     assert_eq!(ctx.execute("Q::6236").unwrap()[0].extra["surah"], 114);
 }
 

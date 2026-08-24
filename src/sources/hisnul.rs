@@ -171,12 +171,11 @@ impl Source for HisnulMuslim {
         })?;
 
         for number in reference.expand(total)? {
-            let item = chapter
-                .text
-                .get((number - 1) as usize)
-                .ok_or_else(|| Error::ReferenceNotFound {
+            let item = chapter.text.get((number - 1) as usize).ok_or_else(|| {
+                Error::ReferenceNotFound {
                     detail: format!("HM:{wanted}:{number}"),
-                })?;
+                }
+            })?;
 
             let mut extra: std::collections::BTreeMap<String, Value> = [
                 ("chapter".to_string(), wanted.into()),

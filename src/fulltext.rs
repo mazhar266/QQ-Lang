@@ -133,9 +133,7 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
     std::fs::create_dir_all(&path).map_err(|e| wrap(e, &path))?;
 
     let index = Index::create_in_dir(&path, schema).map_err(|e| wrap(e, &path))?;
-    let mut writer = index
-        .writer(50_000_000)
-        .map_err(|e| wrap(e, &path))?;
+    let mut writer = index.writer(50_000_000).map_err(|e| wrap(e, &path))?;
 
     let mut documents = 0usize;
     let mut misses = 0u32;
@@ -232,9 +230,12 @@ impl Searcher {
         let folded = crate::search::fold(term);
         // The term carries its own boolean/phrase syntax, so a malformed one
         // is a bad query rather than an internal fault.
-        let parsed = self.parser.parse_query(&folded).map_err(|e| Error::Unsupported {
-            detail: format!("could not parse the search term: {e}"),
-        })?;
+        let parsed = self
+            .parser
+            .parse_query(&folded)
+            .map_err(|e| Error::Unsupported {
+                detail: format!("could not parse the search term: {e}"),
+            })?;
 
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, parsed)];
 

@@ -180,7 +180,10 @@ impl Source for HadithCollection {
                     ("chapter_name_ar".to_string(), chapter_ar.into()),
                     ("chapter_name_en".to_string(), chapter_en.into()),
                     ("number".to_string(), number.into()),
-                    ("narrator".to_string(), hadith.english.narrator.clone().into()),
+                    (
+                        "narrator".to_string(),
+                        hadith.english.narrator.clone().into(),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -236,7 +239,10 @@ impl HadithCollection {
                     ("chapter_name_en".to_string(), chapter_en.into()),
                     ("number".to_string(), number.into()),
                     ("numbering".to_string(), "book".into()),
-                    ("narrator".to_string(), hadith.english.narrator.clone().into()),
+                    (
+                        "narrator".to_string(),
+                        hadith.english.narrator.clone().into(),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
