@@ -40,12 +40,23 @@ jobs:
         with:
           submodules: true
 
-      # A v3.0.0 tag must not ship a binary that reports 3.1.0.
-      - name: Tag matches Cargo.toml
+      # The tag is the single source of truth for the version: v3.1.0 stamps
+      # 3.1.0 into Cargo.toml before the build, so the binary reports it and
+      # Cargo.toml never needs a bump commit first. A malformed tag produces a
+      # bad semver and cargo refuses loudly. (python3: portable in-place edit;
+      # BSD and GNU sed disagree about -i.)
+      - name: Version from tag
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          grep -q "^version = \"$tag\"" Cargo.toml \
-            || { echo "tag v$tag != Cargo.toml version"; exit 1; }
+          python3 - "$GITHUB_REF_NAME" <<'EOF'
+          import pathlib, re, sys
+          version = sys.argv[1].removeprefix("v")
+          p = pathlib.Path("Cargo.toml")
+          text, n = re.subn(r'^version = ".*"$', f'version = "{version}"',
+                            p.read_text(), count=1, flags=re.M)
+          assert n == 1, "no version line found"
+          p.write_text(text)
+          print("building as", version)
+          EOF
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -57,6 +68,14 @@ jobs:
       # staged data — a bundle that cannot answer Q:1:1 never ships.
       - name: Package
         run: scripts/package.sh "qql-${GITHUB_REF_NAME}-${{ matrix.name }}"
+
+      # The stamp must have reached the binary — a bundle claiming the wrong
+      # version never ships.
+      - name: Binary reports the tag version
+        run: |
+          bundle="dist/qql-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          bin="$bundle/qql"; [ -f "$bin.exe" ] && bin="$bin.exe"
+          "$bin" --version | grep -F "${GITHUB_REF_NAME#v}"
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar'

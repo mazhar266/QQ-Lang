@@ -44,7 +44,7 @@ cargo run --features fulltext -- 'q:?"mercy"~5'
 Test every combination when touching search: default, `--features vector`,
 `--features fulltext`, `--features vector,fulltext`.
 
-Releasing: push a tag from a green main — `git tag v3.0.0 && git push origin v3.0.0`. [.github/workflows/release.yml](.github/workflows/release.yml) builds self-contained bundles (CLI + libraries + header + data + indexes) for Linux, macOS (both arches) and Windows via `scripts/package.sh`, smoke-tests each bundle against its own data, and attaches them to the GitHub release. The tag must match `Cargo.toml`'s version or the job refuses.
+Releasing: push a tag from a green main — `git tag v3.0.0 && git push origin v3.0.0`. [.github/workflows/release.yml](.github/workflows/release.yml) builds self-contained bundles (CLI + libraries + header + data + indexes) for Linux, macOS (both arches) and Windows via `scripts/package.sh`, smoke-tests each bundle against its own data, and attaches them to the GitHub release. The version is stamped from the tag into `Cargo.toml` before the build — no bump commit needed; the binary must report the tag's version or the job fails.
 
 FFI and parser work:
 

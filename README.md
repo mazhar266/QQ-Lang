@@ -394,7 +394,7 @@ cd qql-v3.0.0-x86_64-linux
 ./qql 'q:1:?"mercy"~5'        # both search engines included
 ```
 
-Maintainers cut one by pushing a matching tag: `git tag v3.0.0 && git push origin v3.0.0`.
+Maintainers cut one by pushing a tag: `git tag v3.1.0 && git push origin v3.1.0`. The tag alone decides the version — it is stamped into the build, so no `Cargo.toml` bump commit is needed first.
 
 ## CLI
 
