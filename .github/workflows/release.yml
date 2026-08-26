@@ -37,8 +37,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
 
       # The tag is the single source of truth for the version: v3.1.0 stamps
       # 3.1.0 into Cargo.toml before the build, so the binary reports it and

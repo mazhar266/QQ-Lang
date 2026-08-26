@@ -319,18 +319,29 @@ There are two ways to address an item, and every source supports both.
 - **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy), matching the upstream per-chapter files.
 - **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27.
 
-**Across the whole book** — `SOURCE::n` skips the chapter and uses traditional continuous numbering, which is what citations normally mean:
+**Across the whole book** — `SOURCE::n` skips the chapter and uses the
+**canonical citation numbers**: 'Abd al-Baqi's numbering for Bukhari
+(1–7563), Dar-us-Salam's for Muslim, the sunnah.com reference numbers for the
+rest. `B::6403` returns what the world cites as Bukhari 6403.
 
 ```text
-B::100        hadith 100 of Sahih al-Bukhari
+B::6403       the "la ilaha illallah a hundred times" hadith
+B::7563       the famous closing hadith of Sahih al-Bukhari
 Q::100        the 100th ayah of the mushaf (Surah 2, ayah 93)
 HM::75        the 75th supplication of Hisnul Muslim
 B::1-10,255   ranges and lists work the same
 ```
 
-Records from the flat form carry `"numbering": "book"`, so a single query mixing both forms — `B:1:1;B::100;` — stays unambiguous. They also still report the chapter they belong to.
+For hadith this resolves through small committed maps
+(`sources/canonical/*.json`, built by `scripts/build-canonical.py` from the
+public-domain [fawazahmed0/hadith-api](https://github.com/fawazahmed0/hadith-api)
+dataset and validated against the local text). The canonical space has holes —
+front matter such as Muslim's Muqaddima owns canonical 1–92, and lettered
+variants like 1771.5 are not integers. Asking for such a number alone is an
+error; a range simply skips them.
 
-Bounds are the whole collection: 1–6236 for the Quran, 1–7277 for Bukhari, 1–267 for Hisnul Muslim.
+Records from the flat form carry `"numbering": "book"`, so a single query
+mixing both forms stays unambiguous, and they still report their chapter.
 
 ### Examples
 
@@ -675,19 +686,24 @@ Semantic validation lives inside `resolve` rather than a separate `validate` met
 
 ## Data
 
-Text comes from two open-source datasets, vendored as git submodules under `sources/`. Nothing is transformed or copied at build time — the resolvers read the upstream layout directly, so keeping the data current is a `git submodule update`.
-
-```bash
-git submodule update --init
-```
+All text is committed directly under `sources/` — **no submodules**, no build
+step, no network. A plain `git clone` is a complete working installation.
 
 ```text
 sources/
-  quran/chapters/{1..114}.json                         generated — see below
-  quran/verses/{1..6236}.json                          generated — mushaf order
-  hadith-json/db/by_chapter/the_9_books/{book}/{chapter}.json
-  Hisn-Muslim-Json/husn_en.json                        all 132 chapters in one file
+  quran/chapters/{1..114}.json       Arabic + English, one file per Surah
+  hadith/{book}/{chapter}.json       the six collections, per chapter
+  hisnul-muslim/husn_en.json         all 132 chapters in one file
+  canonical/{CODE}.json              citation-number maps for B::N
+  vectors/{CODE}.qv                  similarity indexes (vector feature)
+  fulltext/{CODE}/                   tantivy indexes (fulltext feature)
 ```
+
+The hadith and Hisnul Muslim data originate from
+[hadith-json](https://github.com/AhmedBaset/hadith-json) (ISC) and
+[Hisn-Muslim-Json](https://github.com/wafaaelmaandy/Hisn-Muslim-Json), carried
+unmodified with `ATTRIBUTION.md` files alongside. Only the six collections QQL
+resolves are included.
 
 ### The Quran directory is generated, not vendored
 
@@ -699,28 +715,26 @@ python3 scripts/build-quran.py --check    # verify only, write nothing
 ```
 
 The Arabic comes from **Tanzil's Uthmani text**; names, the English translation and
-the per-ayah transliteration still come from the `quran-json-arabic` submodule.
+the per-ayah transliteration still come from the `quran-json-arabic` project,
+fetched only when rebuilding.
 
-The split exists because that submodule spells three marks with codepoints that mean
+The split exists because that package spells three marks with codepoints that mean
 something else in Unicode — `U+0657 INVERTED DAMMA` for an open fathatan, `U+065E` for
 a dammatan, `U+0656` for a kasratan. A font that follows Unicode draws them literally,
 so 2:286's `إِصْرًا` gains a damma above the reh and reads *isru* rather than *isran*.
 Tanzil uses the standard marks and carries the pause, sajdah and silence signs the
-submodule omits.
+package omits.
 
 The generator refuses to write unless the two texts agree: same ayah counts per surah,
 no misused codepoint in the output, the basmalah stripped from exactly the 112 surahs
 that carry it, and the consonant skeletons matching except for the handful of ayat
 where the two disagree about hamza spelling (`ئ` versus `ي` plus a combining hamza).
 
-`quran/verses/` carries only the English translation. The submodule ships ten languages
-per ayah, which made the equivalent directory 14 MB rather than 2.6 MB, and QQL reads
-only the one.
-
 Files are read on first use and cached in the `Context` until it drops — `Q:2:255` loads roughly 50 KB, not the whole mushaf. There is no eviction policy.
 
-The datasets carry their own licenses; see the submodule directories, and
-`sources/quran/TANZIL-LICENSE.txt` for the Quran text.
+Licensing sits next to the data: `sources/quran/TANZIL-LICENSE.txt` for the
+Quran text, and the `ATTRIBUTION.md` files in `sources/hadith/` and
+`sources/hisnul-muslim/`.
 
 Upstream data is taken as authoritative and is never rewritten, but it is not uniform. The Hisnul Muslim file in particular carries a UTF-8 BOM, stores its chapters out of numerical order, repeats a key in two entries, and misspells one field name. Those are absorbed where they belong — the BOM in [src/repo.rs](src/repo.rs) since it is a storage concern, the rest in [src/sources/hisnul.rs](src/sources/hisnul.rs) — rather than by patching the data.
 

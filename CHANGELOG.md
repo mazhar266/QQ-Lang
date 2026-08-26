@@ -18,6 +18,37 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ---
 
+## 3.1.0 — Canonical hadith numbering
+
+`B::N` now resolves the numbers the world actually cites.
+
+### Fixed
+
+- **`B::6403` returns what every hadith site calls Bukhari 6403.** The flat
+  form previously exposed the dataset's private sequential numbering, which
+  drifts from the canonical editions by up to ~300 — silently returning a
+  *neighboring, wrong* hadith for any number pasted from sunnah.com or a
+  printed edition. It now resolves through committed maps
+  (`sources/canonical/*.json`) built from the public-domain
+  fawazahmed0/hadith-api dataset: 'Abd al-Baqi numbering for Bukhari,
+  Dar-us-Salam for Muslim, sunnah.com reference numbers for the rest. Every
+  mapping is validated against the local text at build time.
+
+### Changed
+
+- The canonical space has holes — front matter (Muslim's Muqaddima owns
+  canonical 1–92) and lettered variants (1771.5). Alone they error with a
+  clear message; inside a range they are skipped.
+- The 60 MB `by_book/` files are no longer read, and release bundles shrink
+  by that much (212 → 161 MB staged).
+- **No more git submodules.** The six hadith collections and the Hisnul
+  Muslim file are committed directly (`sources/hadith/`,
+  `sources/hisnul-muslim/`, with attribution), so a plain `git clone` is a
+  complete working installation — no `--recurse-submodules`, no network at
+  build time.
+
+---
+
 ## 3.0.0 — Indexed search
 
 Ranked full-text search over a real inverted index, behind the `fulltext`

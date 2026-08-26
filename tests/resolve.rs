@@ -539,33 +539,99 @@ fn flat_numbering_reads_across_the_whole_book() {
     assert_eq!(numbers, [100, 1, 2, 3]);
 }
 
-/// The first hadith of chapter 1 *is* the first hadith of the book, for every
-/// collection. This is what catches the `id` / `idInBook` confusion: the
-/// `by_book` files number `id` across all nine books at once (Muslim starts at
-/// 7278), so using it would silently return the wrong hadith for everything
-/// except Bukhari.
+/// `B::N` resolves canonical citation numbers — 'Abd al-Baqi for Bukhari,
+/// Dar-us-Salam for Muslim — through the committed maps, so what the world
+/// cites as "Bukhari 6403" is what `B::6403` returns. The dataset's private
+/// sequential numbering (which had this hadith at 6164) is not exposed.
 #[test]
-fn flat_and_chapter_numbering_agree_at_the_start_of_every_collection() {
+fn flat_numbers_are_the_canonical_citation_numbers() {
+    let mut ctx = ctx!();
+
+    // The hadith every site numbers Bukhari 6403: "whoever says la ilaha
+    // illallah a hundred times a day" — Invocations, freeing ten slaves.
+    let hit = &ctx.execute("B::6403").unwrap()[0];
+    assert_eq!(hit.extra["chapter"], 80);
+    assert_eq!(hit.extra["number"], 6403);
+    assert!(hit.en.contains("ten slaves"), "wrong hadith: {}", hit.en);
+
+    // Canonical 7563 is the famous closing hadith of Sahih al-Bukhari.
+    let last = &ctx.execute("B::7563").unwrap()[0];
+    assert_eq!(last.extra["chapter"], 97);
+    assert!(last.en.contains("two words"), "wrong hadith: {}", last.en);
+
+    // A flat hit is byte-identical to its chapter form.
+    assert_eq!(
+        ctx.execute("B::6403").unwrap()[0].ar,
+        ctx.execute("B:80:98").unwrap()[0].ar
+    );
+}
+
+/// For every collection, the first *canonical* number is the first hadith of
+/// chapter 1 — numbering and chapter order agree where the numbered body
+/// starts. The first number is read from the committed maps (93 for Muslim,
+/// 267 for Ibn Majah — their introductions own the numbers before), so this
+/// cannot drift from the data.
+#[test]
+fn the_first_canonical_number_opens_chapter_one() {
     let mut ctx = ctx!();
 
     for code in ["B", "M", "AD", "T", "N", "IM"] {
-        let flat = ctx.execute(&format!("{code}::1")).unwrap();
-        let chaptered = ctx.execute(&format!("{code}:1:1")).unwrap();
+        let map: std::collections::HashMap<String, (u32, u32)> = serde_json::from_str(
+            &std::fs::read_to_string(format!("sources/canonical/{code}.json")).unwrap(),
+        )
+        .unwrap();
+        let first = map.keys().map(|k| k.parse::<u32>().unwrap()).min().unwrap();
 
-        assert_eq!(flat.len(), 1, "{code}::1");
-        assert_eq!(flat[0].ar, chaptered[0].ar, "{code}: Arabic differs");
-        assert_eq!(flat[0].en, chaptered[0].en, "{code}: English differs");
-        assert_eq!(flat[0].extra["chapter"], 1, "{code}: wrong chapter");
+        let flat = ctx.execute(&format!("{code}::{first}")).unwrap();
+        let chaptered = ctx.execute(&format!("{code}:1:1")).unwrap();
+        assert_eq!(flat[0].ar, chaptered[0].ar, "{code}::{first} != {code}:1:1");
+        assert_eq!(flat[0].extra["chapter"], 1, "{code}");
     }
 }
 
-/// Sunan an-Nasa'i has a chapter numbered `35.2`, so chapter identifiers are
-/// not always integers. Forcing `u32` would fail the whole file.
+/// The canonical space has holes — front matter and lettered variants. Alone
+/// they error; inside a range they are skipped, so walking the whole book
+/// (which is exactly what unscoped search does) never trips.
 #[test]
-fn non_integer_chapter_ids_do_not_break_the_book_file() {
+fn canonical_holes_error_alone_but_ranges_skip_them() {
     let mut ctx = ctx!();
-    assert!(ctx.execute("N::1-5").is_ok());
-    assert_eq!(ctx.execute("N::5768").unwrap().len(), 1);
+
+    // Muslim's Muqaddima owns canonical 1..92.
+    let error = ctx.execute("M::1").unwrap_err();
+    assert_eq!(error.code(), "QQL_REFERENCE_NOT_FOUND");
+    assert!(error.to_string().contains("front matter"), "{error}");
+
+    // Tirmidhi 2089 exists canonically but is absent from the local data.
+    assert_eq!(
+        ctx.execute("T::2089").unwrap_err().code(),
+        "QQL_REFERENCE_NOT_FOUND"
+    );
+
+    // A range across Muslim's front matter yields only the mapped numbers.
+    let numbers: Vec<_> = ctx
+        .execute("M::90-95")
+        .unwrap()
+        .iter()
+        .map(|r| r.extra["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, [93, 94, 95]);
+}
+
+/// Each collection's canonical axis reaches its true maximum and no further.
+#[test]
+fn the_canonical_axis_reaches_each_collections_maximum() {
+    let mut ctx = ctx!();
+    for (query, expect_err) in [
+        ("N::5758", false),
+        ("N::5759", true),
+        ("M::7563", false),
+        ("AD::5274", false),
+        ("IM::4341", false),
+        ("B::7563", false),
+    ] {
+        let result = ctx.execute(query);
+        assert_eq!(result.is_err(), expect_err, "{query}: {result:?}");
+    }
 }
 
 #[test]
