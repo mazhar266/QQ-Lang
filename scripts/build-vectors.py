@@ -123,7 +123,7 @@ def read_quran():
 
 
 def read_hadith(directory):
-    base = os.path.join(SOURCES, 'hadith-json/db/by_chapter/the_9_books', directory)
+    base = os.path.join(SOURCES, 'hadith', directory)
     if not os.path.isdir(base):
         return
     # Some collections carry an `introduction.json` beside the numbered
@@ -143,7 +143,7 @@ def read_hadith(directory):
 
 
 def read_hisnul():
-    path = os.path.join(SOURCES, 'Hisn-Muslim-Json/husn_en.json')
+    path = os.path.join(SOURCES, 'hisnul-muslim/husn_en.json')
     if not os.path.exists(path):
         return
     with open(path, encoding='utf-8-sig') as f:

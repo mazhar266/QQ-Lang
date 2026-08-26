@@ -31,20 +31,14 @@ done
 cp include/qql.h "$out/include/"
 
 # --- data: exactly what the resolvers read, nothing else --------------------
-mkdir -p "$out/sources/quran" \
-         "$out/sources/hadith-json/db/by_chapter/the_9_books" \
-         "$out/sources/hadith-json/db/by_book/the_9_books" \
-         "$out/sources/Hisn-Muslim-Json"
+mkdir -p "$out/sources/quran"
 
 cp -r sources/quran/chapters "$out/sources/quran/"
 cp sources/quran/TANZIL-LICENSE.txt "$out/sources/quran/"
-for book in bukhari muslim abudawud tirmidhi nasai ibnmajah; do
-    cp -r "sources/hadith-json/db/by_chapter/the_9_books/$book" \
-          "$out/sources/hadith-json/db/by_chapter/the_9_books/"
-    cp "sources/hadith-json/db/by_book/the_9_books/$book.json" \
-       "$out/sources/hadith-json/db/by_book/the_9_books/"
-done
-cp sources/Hisn-Muslim-Json/husn_en.json "$out/sources/Hisn-Muslim-Json/"
+cp -r sources/hadith "$out/sources/"
+cp -r sources/hisnul-muslim "$out/sources/"
+# Canonical citation-number maps: what B::6403 resolves through.
+cp -r sources/canonical "$out/sources/"
 cp -r sources/vectors "$out/sources/"
 cp -r sources/fulltext "$out/sources/"
 # Tantivy lock files are runtime artifacts, recreated on demand.
@@ -57,6 +51,7 @@ cp LICENSE.md README.md "$out/"
     cd "$out"
     bin=./qql; [ -f qql.exe ] && bin=./qql.exe
     "$bin" --compact 'Q:1:1'           | grep -q '"ok":true'
+    "$bin" --compact 'b::6403'         | grep -q '"chapter":80'
     "$bin" --compact 'b::100'          | grep -q '"numbering":"book"'
     "$bin" --compact 'q:1:?"mercy"~1'  | grep -q '"ranked":true'
     "$bin" --compact 'q:1:*"worship"'  | grep -q '"ranked":true'

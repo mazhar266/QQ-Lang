@@ -3,7 +3,7 @@
 
 //! Hisnul Muslim resolver.
 //!
-//! Reads `Hisn-Muslim-Json/husn_en.json` — a single ~280 KB file holding all
+//! Reads `hisnul-muslim/husn_en.json` — a single ~280 KB file holding all
 //! 132 chapters, loaded once and cached.
 //!
 //! # Numbering
@@ -33,7 +33,7 @@ use crate::sources::Source;
 use serde::Deserialize;
 use serde_json::Value;
 
-const FILE: &str = "Hisn-Muslim-Json/husn_en.json";
+const FILE: &str = "hisnul-muslim/husn_en.json";
 
 /// `HM` — Hisnul Muslim (Fortress of the Muslim).
 #[derive(Debug, Default)]
