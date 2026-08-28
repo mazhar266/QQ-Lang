@@ -36,6 +36,52 @@ impl Registry {
                 Box::new(HadithCollection::new("T", "Jami' at-Tirmidhi", "tirmidhi")),
                 Box::new(HadithCollection::new("N", "Sunan an-Nasa'i", "nasai")),
                 Box::new(HadithCollection::new("IM", "Sunan Ibn Majah", "ibnmajah")),
+                Box::new(HadithCollection::new("MA", "Muwatta Malik", "malik")),
+                // The forties are undivided books; their single chapter is 1,
+                // so `NW::13` and `NW:1:13` are the same hadith.
+                Box::new(HadithCollection::new(
+                    "NW",
+                    "Al-Arba'in an-Nawawiyyah",
+                    "nawawi40",
+                )),
+                Box::new(HadithCollection::new("QD", "Forty Hadith Qudsi", "qudsi40")),
+                Box::new(HadithCollection::new(
+                    "SW",
+                    "Forty Hadith of Shah Waliullah",
+                    "shahwaliullah40",
+                )),
+                // No citation numbering QQL can source for these — chapter
+                // addressing only. See `HadithCollection::chaptered`.
+                Box::new(HadithCollection::chaptered(
+                    "DA",
+                    "Sunan ad-Darimi",
+                    "darimi",
+                )),
+                Box::new(HadithCollection::chaptered(
+                    "RS",
+                    "Riyad as-Salihin",
+                    "riyad_assalihin",
+                )),
+                Box::new(HadithCollection::chaptered(
+                    "BM",
+                    "Bulugh al-Maram",
+                    "bulugh_almaram",
+                )),
+                Box::new(HadithCollection::chaptered(
+                    "AM",
+                    "Al-Adab Al-Mufrad",
+                    "aladab_almufrad",
+                )),
+                Box::new(HadithCollection::chaptered(
+                    "MK",
+                    "Mishkat al-Masabih",
+                    "mishkat_almasabih",
+                )),
+                Box::new(HadithCollection::chaptered(
+                    "SM",
+                    "Ash-Shama'il Al-Muhammadiyah",
+                    "shamail_muhammadiyah",
+                )),
                 Box::new(HisnulMuslim),
             ],
         }

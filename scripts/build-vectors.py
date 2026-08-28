@@ -162,6 +162,16 @@ CORPORA = {
     'T': lambda: read_hadith('tirmidhi'),
     'N': lambda: read_hadith('nasai'),
     'IM': lambda: read_hadith('ibnmajah'),
+    'MA': lambda: read_hadith('malik'),
+    'DA': lambda: read_hadith('darimi'),
+    'RS': lambda: read_hadith('riyad_assalihin'),
+    'BM': lambda: read_hadith('bulugh_almaram'),
+    'AM': lambda: read_hadith('aladab_almufrad'),
+    'MK': lambda: read_hadith('mishkat_almasabih'),
+    'SM': lambda: read_hadith('shamail_muhammadiyah'),
+    'NW': lambda: read_hadith('nawawi40'),
+    'QD': lambda: read_hadith('qudsi40'),
+    'SW': lambda: read_hadith('shahwaliullah40'),
     'HM': read_hisnul,
 }
 

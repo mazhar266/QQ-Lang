@@ -575,7 +575,7 @@ fn flat_numbers_are_the_canonical_citation_numbers() {
 fn the_first_canonical_number_opens_chapter_one() {
     let mut ctx = ctx!();
 
-    for code in ["B", "M", "AD", "T", "N", "IM"] {
+    for code in ["B", "M", "AD", "T", "N", "IM", "MA", "NW", "QD", "SW"] {
         let map: std::collections::HashMap<String, (u32, u32)> = serde_json::from_str(
             &std::fs::read_to_string(format!("sources/canonical/{code}.json")).unwrap(),
         )
@@ -586,6 +586,66 @@ fn the_first_canonical_number_opens_chapter_one() {
         let chaptered = ctx.execute(&format!("{code}:1:1")).unwrap();
         assert_eq!(flat[0].ar, chaptered[0].ar, "{code}::{first} != {code}:1:1");
         assert_eq!(flat[0].extra["chapter"], 1, "{code}");
+    }
+}
+
+/// Every registered hadith collection resolves its very first hadith. Adding
+/// a collection is a registry line plus a data directory, and this is what
+/// catches a code that points at a directory nobody copied in.
+#[test]
+fn every_hadith_collection_resolves_its_first_hadith() {
+    let mut ctx = ctx!();
+
+    for code in [
+        "B", "M", "AD", "T", "N", "IM", "MA", "DA", "RS", "BM", "AM", "MK", "SM", "NW", "QD", "SW",
+    ] {
+        let records = ctx
+            .execute(&format!("{code}:1:1"))
+            .unwrap_or_else(|e| panic!("{code}:1:1 — {e}"));
+        assert_eq!(records.len(), 1, "{code}");
+        assert_eq!(records[0].source, code);
+        assert!(!records[0].ar.is_empty(), "{code} has no Arabic");
+    }
+}
+
+/// Collections registered with `HadithCollection::chaptered` have no citation
+/// numbering QQL can source, so both forms that would need one are refused
+/// outright. Neither may quietly fall back to the sequential position, which
+/// is not what these books are cited by.
+#[test]
+fn collections_without_a_citation_numbering_refuse_the_flat_form() {
+    let mut ctx = ctx!();
+
+    for code in ["DA", "RS", "BM", "AM", "MK", "SM"] {
+        let flat = ctx.execute(&format!("{code}::1")).unwrap_err();
+        assert_eq!(flat.code(), "QQL_UNSUPPORTED", "{code}::1");
+
+        // `total()` reports no book-wide axis, so an unscoped search is
+        // refused rather than silently narrowed to some prefix.
+        let whole = ctx.execute(&format!("{code}:\"a\"")).unwrap_err();
+        assert_eq!(whole.code(), "QQL_UNSUPPORTED", "{code}:\"a\"");
+
+        // Scoped search still works — the refusal is about numbering only.
+        assert!(ctx.execute(&format!("{code}:1:\"a\"")).is_ok(), "{code}");
+    }
+}
+
+/// The forties are undivided books: the whole text is chapter 1, so the
+/// canonical number and the within-chapter position are the same hadith.
+#[test]
+fn the_forties_address_the_same_hadith_both_ways() {
+    let mut ctx = ctx!();
+
+    for (code, last) in [("NW", 42), ("QD", 40), ("SW", 40)] {
+        assert_eq!(
+            ctx.execute(&format!("{code}::{last}")).unwrap()[0].ar,
+            ctx.execute(&format!("{code}:1:{last}")).unwrap()[0].ar,
+            "{code}"
+        );
+        assert!(
+            ctx.execute(&format!("{code}::{}", last + 1)).is_err(),
+            "{code}"
+        );
     }
 }
 

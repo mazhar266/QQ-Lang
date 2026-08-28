@@ -28,7 +28,7 @@ fails the build rather than shipping silently-wrong scripture.
 
 Usage:
     python3 scripts/build-canonical.py                 # fetch from jsDelivr
-    python3 scripts/build-canonical.py --from DIR      # use cached {book}.json
+    python3 scripts/build-canonical.py --from DIR      # use cached {edition}.json
 """
 import argparse
 import json
@@ -42,13 +42,27 @@ OUT = os.path.join(ROOT, 'sources/canonical')
 
 CDN = 'https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/ara-{book}.min.json'
 
+# (upstream edition, local directory under sources/hadith, QQL code). The
+# edition name and the directory differ for the forties, whose local copies
+# keep the hadith-json project's directory names.
+#
+# Only collections the upstream API carries appear here. The rest — ad-Darimi,
+# Riyad as-Salihin, Bulugh al-Maram, al-Adab al-Mufrad, Mishkat al-Masabih,
+# ash-Shama'il — have no citation numbering to map, and are registered with
+# `HadithCollection::chaptered` so `CODE::N` is refused rather than guessed.
 BOOKS = [
-    ('bukhari', 'B'),
-    ('muslim', 'M'),
-    ('abudawud', 'AD'),
-    ('tirmidhi', 'T'),
-    ('nasai', 'N'),
-    ('ibnmajah', 'IM'),
+    ('bukhari', 'bukhari', 'B'),
+    ('muslim', 'muslim', 'M'),
+    ('abudawud', 'abudawud', 'AD'),
+    ('tirmidhi', 'tirmidhi', 'T'),
+    ('nasai', 'nasai', 'N'),
+    ('ibnmajah', 'ibnmajah', 'IM'),
+    ('malik', 'malik', 'MA'),
+    # The forties are undivided: their whole text is chapter 1, so the map is
+    # an identity 1..40 — built and validated the same way regardless.
+    ('nawawi', 'nawawi40', 'NW'),
+    ('qudsi', 'qudsi40', 'QD'),
+    ('dehlawi', 'shahwaliullah40', 'SW'),
 ]
 
 
@@ -70,12 +84,12 @@ def chapter_sizes(book):
     return sizes
 
 
-def build(book, code, cache):
+def build(edition, book, code, cache):
     sizes = chapter_sizes(book)
     mapping = {}
     skipped_front, skipped_variant, missing_locally = 0, 0, 0
 
-    for entry in canonical_entries(book, cache):
+    for entry in canonical_entries(edition, cache):
         number = entry['hadithnumber']
         ref = entry['reference']
         chapter, item = ref['book'], ref['hadith']
@@ -133,8 +147,8 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
-    for book, code in BOOKS:
-        build(book, code, args.cache)
+    for edition, book, code in BOOKS:
+        build(edition, book, code, args.cache)
     return 0
 
 

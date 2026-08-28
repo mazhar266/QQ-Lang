@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Mazhar Ahmed
 
-//! Hadith resolver, shared by every collection in the nine books.
+//! Hadith resolver, shared by every hadith collection QQL carries.
 //!
-//! Reads `hadith/{book}/{chapter}.json`. One
-//! implementation covers Bukhari, Muslim, Abu Dawud, Tirmidhi, Nasa'i, and Ibn
-//! Majah — they differ only in a code, a name, and a directory, so they are
-//! instances rather than separate types.
+//! Reads `hadith/{book}/{chapter}.json`. One implementation covers all of
+//! them — the six canonical Sunni collections, the Muwatta, ad-Darimi, the
+//! topical works (Riyad as-Salihin, Bulugh al-Maram, al-Adab al-Mufrad,
+//! Mishkat al-Masabih, ash-Shama'il) and the three forties. They differ only
+//! in a code, a name, a directory, and whether they have a citation
+//! numbering, so they are instances rather than separate types.
 //!
 //! # Numbering
 //!
@@ -33,6 +35,11 @@
 //! Records from the flat form carry `"numbering": "book"` and the canonical
 //! number, so the two modes cannot be confused when a single query mixes
 //! them.
+//!
+//! Not every collection has a citation numbering QQL can source. Those are
+//! built with [`HadithCollection::chaptered`] and serve `CODE:chapter:number`
+//! only; see that constructor for why inventing one would be worse than
+//! refusing.
 
 use crate::ast::{Range, Reference};
 use crate::error::Error;
@@ -55,13 +62,44 @@ pub struct HadithCollection {
     code: &'static str,
     name: &'static str,
     dir: &'static str,
+    /// Whether a `canonical/{CODE}.json` map exists, i.e. whether `CODE::N`
+    /// means anything for this collection. See [`HadithCollection::chaptered`].
+    numbered: bool,
 }
 
 impl HadithCollection {
-    /// Define a collection: QQL code, display name, and directory under
-    /// `sources/hadith`.
+    /// Define a collection that has a canonical citation numbering: QQL code,
+    /// display name, and directory under `sources/hadith`.
+    ///
+    /// Requires a committed `canonical/{code}.json` map — build it with
+    /// `scripts/build-canonical.py`.
     pub const fn new(code: &'static str, name: &'static str, dir: &'static str) -> Self {
-        HadithCollection { code, name, dir }
+        HadithCollection {
+            code,
+            name,
+            dir,
+            numbered: true,
+        }
+    }
+
+    /// Define a collection addressable **only** as `CODE:chapter:number`.
+    ///
+    /// Some collections have no citation numbering QQL can source. The data
+    /// carries a per-chapter position and nothing else, and the sequential
+    /// position within the book is *not* the number these books are cited by
+    /// — publishing it as one would answer real citations with the wrong
+    /// hadith, which is the same trap `idInBook` sets for Bukhari.
+    ///
+    /// So `CODE::N` is refused outright, and `total` reports no book-wide
+    /// axis, which turns an unscoped search into `QQL_UNSUPPORTED` rather
+    /// than a silently narrowed one.
+    pub const fn chaptered(code: &'static str, name: &'static str, dir: &'static str) -> Self {
+        HadithCollection {
+            code,
+            name,
+            dir,
+            numbered: false,
+        }
     }
 }
 
@@ -101,6 +139,9 @@ impl Source for HadithCollection {
     }
 
     fn total(&self, repo: &mut Repository) -> Result<Option<u32>, Error> {
+        if !self.numbered {
+            return Ok(None);
+        }
         let map = self.canonical(repo)?;
         Ok(Some(
             map.keys()
@@ -188,6 +229,14 @@ impl HadithCollection {
     /// The committed canonical-number map for this collection:
     /// canonical citation number → `(chapter, item)`.
     fn canonical(&self, repo: &mut Repository) -> Result<Arc<CanonicalMap>, Error> {
+        if !self.numbered {
+            return Err(Error::Unsupported {
+                detail: format!(
+                    "{0} has no canonical citation numbering; address it as {0}:chapter:number",
+                    self.code
+                ),
+            });
+        }
         match repo.load(format!("{CANONICAL_DIR}/{}.json", self.code)) {
             Err(Error::DataFileNotFound { .. }) => Err(Error::Unsupported {
                 detail: format!(

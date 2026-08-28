@@ -1,0 +1,6 @@
+[submodule "sources/hadith-json"]
+	path = sources/hadith-json
+	url = git@github.com:AhmedBaset/hadith-json.git
+[submodule "sources/compressed_hadith_sqlite"]
+	path = sources/compressed_hadith_sqlite
+	url = git@github.com:IsmailHosenIsmailJames/compressed_hadith_sqlite.git

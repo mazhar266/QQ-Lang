@@ -296,18 +296,40 @@ python3 scripts/build-vectors.py --source Q   # just one
 
 ### Source codes
 
-| Code | Collection | `primary` is |
-| --- | --- | --- |
-| `Q` | Quran | Surah, 1–114 |
-| `B` | Sahih al-Bukhari | chapter (kitab) |
-| `M` | Sahih Muslim | chapter |
-| `AD` | Sunan Abi Dawud | chapter |
-| `T` | Jami' at-Tirmidhi | chapter |
-| `N` | Sunan an-Nasa'i | chapter |
-| `IM` | Sunan Ibn Majah | chapter |
-| `HM` | Hisnul Muslim (alias `HISN`) | chapter, 1–132 |
+| Code | Collection | `primary` is | `CODE::N` |
+| --- | --- | --- | --- |
+| `Q` | Quran | Surah, 1–114 | 1–6236 |
+| `B` | Sahih al-Bukhari | chapter (kitab) | 1–7563 |
+| `M` | Sahih Muslim | chapter | 1–7563 |
+| `AD` | Sunan Abi Dawud | chapter | 1–5274 |
+| `T` | Jami' at-Tirmidhi | chapter | 1–3956 |
+| `N` | Sunan an-Nasa'i | chapter | 1–5758 |
+| `IM` | Sunan Ibn Majah | chapter | 1–4341 |
+| `MA` | Muwatta Malik | chapter | 1–1858 |
+| `DA` | Sunan ad-Darimi | chapter | — |
+| `RS` | Riyad as-Salihin | chapter | — |
+| `BM` | Bulugh al-Maram | chapter | — |
+| `AM` | Al-Adab Al-Mufrad | chapter | — |
+| `MK` | Mishkat al-Masabih | chapter | — |
+| `SM` | Ash-Shama'il Al-Muhammadiyah | chapter | — |
+| `NW` | Al-Arba'in an-Nawawiyyah | chapter (one: 1) | 1–42 |
+| `QD` | Forty Hadith Qudsi | chapter (one: 1) | 1–40 |
+| `SW` | Forty Hadith of Shah Waliullah | chapter (one: 1) | 1–40 |
+| `HM` | Hisnul Muslim (alias `HISN`) | chapter, 1–132 | 1–267 |
 
 `qql --sources` prints the registered codes.
+
+The three forties are undivided books, so their whole text is chapter 1 and
+`NW::13` and `NW:1:13` name the same hadith.
+
+A dash in the last column means the collection has **no citation numbering QQL
+can source**: the data carries a per-chapter position and nothing else, and
+the sequential position within the book is not the number these works are
+cited by. Publishing it as one would answer real citations with the wrong
+hadith, so `DA::1` is refused with `QQL_UNSUPPORTED`, and so is an unscoped
+exact search `DA:"..."`, which would have to walk that axis. Scoped search
+(`DA:1:"..."`) and the indexed engines (`DA:?"..."`, `DA:*"..."`) are
+unaffected — they never needed a book-wide number.
 
 ### Numbering
 
@@ -692,7 +714,7 @@ step, no network. A plain `git clone` is a complete working installation.
 ```text
 sources/
   quran/chapters/{1..114}.json       Arabic + English, one file per Surah
-  hadith/{book}/{chapter}.json       the six collections, per chapter
+  hadith/{book}/{chapter}.json       the hadith collections, per chapter
   hisnul-muslim/husn_en.json         all 132 chapters in one file
   canonical/{CODE}.json              citation-number maps for B::N
   vectors/{CODE}.qv                  similarity indexes (vector feature)
@@ -702,7 +724,7 @@ sources/
 The hadith and Hisnul Muslim data originate from
 [hadith-json](https://github.com/AhmedBaset/hadith-json) (ISC) and
 [Hisn-Muslim-Json](https://github.com/wafaaelmaandy/Hisn-Muslim-Json), carried
-unmodified with `ATTRIBUTION.md` files alongside. Only the six collections QQL
+unmodified with `ATTRIBUTION.md` files alongside. Only the collections QQL
 resolves are included.
 
 ### The Quran directory is generated, not vendored
