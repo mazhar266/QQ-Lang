@@ -306,7 +306,7 @@ python3 scripts/build-vectors.py --source Q   # just one
 | `N` | Sunan an-Nasa'i | chapter | 1–5758 |
 | `IM` | Sunan Ibn Majah | chapter | 1–4341 |
 | `MA` | Muwatta Malik | chapter | 1–1858 |
-| `DA` | Sunan ad-Darimi | chapter | — |
+| `DA` | Sunan ad-Darimi (Arabic only) | chapter | — |
 | `RS` | Riyad as-Salihin | chapter | — |
 | `BM` | Bulugh al-Maram | chapter | — |
 | `AM` | Al-Adab Al-Mufrad | chapter | — |
