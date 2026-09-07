@@ -23,6 +23,20 @@
 //! No weights, no matrix multiply, no asset to ship — the same function runs
 //! at build time over the corpus and at query time over the needle.
 //!
+//! # Weighting
+//!
+//! Every token used to count the same, so *is* weighed what *quran* weighed
+//! and a five-letter word contributed four times — once as itself, three
+//! times as its trigrams. Embedder 2 fixes both: each token is scaled by its
+//! inverse document frequency, whole words count [`WORD_WEIGHT`] against a
+//! trigram's 1, and stopwords are zeroed outright.
+//!
+//! The weights ride in the index. Because the embedder hashes tokens anyway,
+//! the table is keyed by hash rather than by word — no vocabulary to ship —
+//! and tokens seen in a single document are left out, since they all share
+//! the same maximum IDF, which the `default` field carries. That is most of
+//! the vocabulary, so the table costs a few hundred KB per source.
+//!
 //! **That makes it fuzzy lexical matching, not semantic.** It is tolerant of
 //! diacritics, prefixes and suffixes — which is worth a lot for Arabic — but
 //! it does not know that *charity* and *zakat* are related. Real semantic
@@ -37,12 +51,18 @@
 //! 0   magic     8 bytes  "QQLVEC1\n"
 //! 8   dims      u32
 //! 12  count     u32
-//! 16  embedder  u32      1 = hashed
-//! 20  reserved  u32
+//! 16  embedder  u32      1 = hashed, 2 = hashed + IDF weights
+//! 20  weights   u32      entries in the weight table; 0 for embedder 1
 //! 24  keys      count × { u32 primary, u32 number, u32 lang }
 //!                         lang: 0 Arabic, 1 English, 2 Emlaei
 //! ..  vectors   count × dims × i8, L2-normalized then scaled by 127
+//! ..  table     f32 default, then weights × { u64 hash, f32 idf },
+//!               sorted by hash                       (embedder 2 only)
 //! ```
+//!
+//! Field 20 was reserved and always written as zero, so an embedder-1 file
+//! stays valid unchanged. The other direction is safe too: an older build
+//! meeting embedder 2 refuses the file by name rather than misreading it.
 //!
 //! Keys carry each vector's address, so a scope filters during the scan and a
 //! hit resolves back through the ordinary `SOURCE:primary:number` path. The
@@ -81,14 +101,57 @@ const RELATIVE_CUTOFF: f32 = 0.5;
 pub enum Embedder {
     /// Signed hash projection of folded tokens. Needs no model asset.
     Hashed,
+    /// The same projection, with each token scaled by its inverse document
+    /// frequency and whole words outweighing their trigrams. Carries a
+    /// weight table in the file; still needs no model asset.
+    HashedIdf,
 }
 
 impl Embedder {
     fn from_id(id: u32) -> Option<Self> {
         match id {
             1 => Some(Embedder::Hashed),
+            2 => Some(Embedder::HashedIdf),
             _ => None,
         }
+    }
+}
+
+/// How much a whole word outweighs one of its character trigrams.
+///
+/// Trigrams exist for morphology — they let an Arabic query reach a prefixed
+/// form of the same root — but they collide across unrelated roots, and a long
+/// word emits several of them. The exact match should dominate.
+pub const WORD_WEIGHT: f32 = 3.0;
+
+/// Per-token weights, keyed by token hash.
+///
+/// Sorted, so a lookup is a binary search over a few tens of thousands of
+/// entries. Anything absent was seen in one document only and takes
+/// `default`, the maximum IDF for the corpus.
+#[derive(Debug, Default)]
+pub struct Weights {
+    default: f32,
+    table: Vec<(u64, f32)>,
+}
+
+impl Weights {
+    /// The IDF of a token, or the default for one the corpus barely carries.
+    fn idf(&self, hash: u64) -> f32 {
+        match self.table.binary_search_by(|(h, _)| h.cmp(&hash)) {
+            Ok(at) => self.table[at].1,
+            Err(_) => self.default,
+        }
+    }
+
+    /// Entries held, excluding the default.
+    pub fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    /// Whether the table is empty.
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
     }
 }
 
@@ -116,6 +179,8 @@ pub struct Index {
     keys: Vec<Key>,
     /// `count × dims` values, row-major.
     data: Vec<i8>,
+    /// Empty for embedder 1, which weighs every token the same.
+    weights: Weights,
 }
 
 impl Index {
@@ -182,11 +247,48 @@ impl Index {
             .map(|&b| b as i8)
             .collect();
 
+        // Weight table, embedder 2 only: `f32 default` then sorted
+        // `(u64 hash, f32 idf)` pairs. Every length is checked, like the rest.
+        let entries = word(20) as usize;
+        let mut weights = Weights::default();
+        if entries > 0 {
+            let table_end = vectors_end
+                .checked_add(4)
+                .and_then(|at| entries.checked_mul(12).and_then(|n| at.checked_add(n)))
+                .ok_or_else(|| bad("index too large"))?;
+            if bytes.len() < table_end {
+                return Err(bad("truncated: the weight table is shorter than promised"));
+            }
+
+            let float = |at: usize| -> f32 {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&bytes[at..at + 4]);
+                f32::from_le_bytes(buf)
+            };
+            let long = |at: usize| -> u64 {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[at..at + 8]);
+                u64::from_le_bytes(buf)
+            };
+
+            weights.default = float(vectors_end);
+            weights.table = Vec::with_capacity(entries);
+            for i in 0..entries {
+                let at = vectors_end + 4 + i * 12;
+                weights.table.push((long(at), float(at + 8)));
+            }
+            // Binary search depends on it, and the file is not trusted.
+            if weights.table.windows(2).any(|w| w[0].0 >= w[1].0) {
+                return Err(bad("weight table is not sorted by hash"));
+            }
+        }
+
         Ok(Index {
             dims,
             embedder,
             keys,
             data,
+            weights,
         })
     }
 
@@ -214,7 +316,13 @@ impl Index {
     pub fn embed(&self, text: &str) -> Vec<i8> {
         match self.embedder {
             Embedder::Hashed => hashed_embed(text, self.dims),
+            Embedder::HashedIdf => weighted_embed(text, self.dims, &self.weights),
         }
+    }
+
+    /// The token weights this index carries. Empty for embedder 1.
+    pub fn weights(&self) -> &Weights {
+        &self.weights
     }
 
     /// The vector at `position`, if it exists.
@@ -296,7 +404,7 @@ fn dot(a: &[i8], b: &[i8]) -> f32 {
 /// Whole words carry meaning; character trigrams carry morphology, which is
 /// what lets an Arabic query match a prefixed or suffixed form of the same
 /// root. Folding first means diacritics never reach the hash.
-pub fn tokens(text: &str) -> Vec<String> {
+pub fn tokens(text: &str) -> Vec<(String, bool)> {
     let folded = crate::search::fold(text);
     let mut out = Vec::new();
 
@@ -304,12 +412,12 @@ pub fn tokens(text: &str) -> Vec<String> {
         if word.is_empty() {
             continue;
         }
-        out.push(word.to_string());
+        out.push((word.to_string(), true));
 
         let chars: Vec<char> = word.chars().collect();
         if chars.len() > 3 {
             for window in chars.windows(3) {
-                out.push(window.iter().collect());
+                out.push((window.iter().collect(), false));
             }
         }
     }
@@ -334,10 +442,36 @@ fn hash(token: &str) -> u64 {
 /// a signed random projection of the bag of tokens. Cheap, allocation-light,
 /// and identical on both sides of the build.
 pub fn hashed_embed(text: &str, dims: usize) -> Vec<i8> {
+    project(text, dims, |_, _, _| 1.0)
+}
+
+/// The same projection, weighted: IDF from the index, whole words scaled by
+/// [`WORD_WEIGHT`], stopwords zeroed.
+///
+/// Zeroing rather than filtering keeps [`tokens`] a pure tokenizer, so
+/// embedder 1 stays bit-identical to what it always produced.
+pub fn weighted_embed(text: &str, dims: usize, weights: &Weights) -> Vec<i8> {
+    project(text, dims, |token, is_word, hash| {
+        if crate::search::is_stopword(token) {
+            return 0.0;
+        }
+        weights.idf(hash) * if is_word { WORD_WEIGHT } else { 1.0 }
+    })
+}
+
+/// Shared projection: each token lands on four dimensions with a sign drawn
+/// from its own hash, scaled by whatever `weight` returns.
+fn project(text: &str, dims: usize, weight: impl Fn(&str, bool, u64) -> f32) -> Vec<i8> {
     let mut acc = vec![0f32; dims];
 
-    for token in tokens(text) {
-        let mut h = hash(&token);
+    for (token, is_word) in tokens(text) {
+        let start = hash(&token);
+        let scale = weight(&token, is_word, start);
+        if scale == 0.0 {
+            continue;
+        }
+
+        let mut h = start;
         for _ in 0..4 {
             let slot = (h % dims as u64) as usize;
             let sign = if h & 0x8000_0000_0000_0000 == 0 {
@@ -345,7 +479,7 @@ pub fn hashed_embed(text: &str, dims: usize) -> Vec<i8> {
             } else {
                 -1.0
             };
-            acc[slot] += sign;
+            acc[slot] += sign * scale;
             h = h.wrapping_mul(0x0000_0100_0000_01b3) ^ (h >> 29);
         }
     }
@@ -389,6 +523,32 @@ mod tests {
             for value in hashed_embed(text, dims) {
                 out.push(value as u8);
             }
+        }
+        out
+    }
+
+    /// An embedder-2 file: vectors weighted by a table the reader must parse.
+    fn build_weighted(dims: usize, rows: &[(Key, &str)], weights: &Weights) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&(dims as u32).to_le_bytes());
+        out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&(weights.table.len() as u32).to_le_bytes());
+        for (key, _) in rows {
+            out.extend_from_slice(&key.primary.to_le_bytes());
+            out.extend_from_slice(&key.number.to_le_bytes());
+            out.extend_from_slice(&key.lang.to_le_bytes());
+        }
+        for (_, text) in rows {
+            for value in weighted_embed(text, dims, weights) {
+                out.push(value as u8);
+            }
+        }
+        out.extend_from_slice(&weights.default.to_le_bytes());
+        for (hash, idf) in &weights.table {
+            out.extend_from_slice(&hash.to_le_bytes());
+            out.extend_from_slice(&idf.to_le_bytes());
         }
         out
     }
@@ -538,5 +698,86 @@ mod tests {
 
         // Scoring zero, it falls under the floor and is not reported.
         assert!(index.nearest(&query, 5, |_| true).is_empty());
+    }
+
+    /// A stopword must not move the vector at all, however often it appears.
+    #[test]
+    fn weighting_zeroes_stopwords() {
+        let weights = Weights {
+            default: 1.0,
+            table: Vec::new(),
+        };
+        assert_eq!(
+            weighted_embed("mercy", 64, &weights),
+            weighted_embed("the mercy of the and is", 64, &weights),
+            "stopwords still reach the projection"
+        );
+    }
+
+    /// A whole word outweighs its own trigrams, so an exact match dominates
+    /// a morphological one.
+    #[test]
+    fn a_whole_word_outweighs_its_trigrams() {
+        let weights = Weights {
+            default: 1.0,
+            table: Vec::new(),
+        };
+        // `charity` and `charitable` share the trigrams of `charit`; only the
+        // first shares the whole word.
+        let query = weighted_embed("charity", 256, &weights);
+        let exact = weighted_embed("charity", 256, &weights);
+        let kin = weighted_embed("charitable", 256, &weights);
+        assert!(
+            dot(&query, &exact) > dot(&query, &kin),
+            "the exact word should win"
+        );
+        assert!(dot(&query, &kin) > 0.0, "but trigrams should still carry");
+    }
+
+    /// The table rides in the file, so a round trip must preserve both the
+    /// weights and the vectors they produced.
+    #[test]
+    fn a_weighted_index_round_trips() {
+        let weights = Weights {
+            default: 4.0,
+            // Sorted by hash, as the format requires.
+            table: {
+                let mut t = vec![(hash("mercy"), 0.5f32), (hash("praise"), 2.0f32)];
+                t.sort_by_key(|(h, _)| *h);
+                t
+            },
+        };
+        let rows = [(key(1, 1), "mercy and praise"), (key(1, 2), "guidance")];
+        let bytes = build_weighted(64, &rows, &weights);
+
+        let index = Index::parse("test.qv", &bytes).unwrap();
+        assert_eq!(index.embedder(), Embedder::HashedIdf);
+        assert_eq!(index.weights().len(), 2);
+        assert!(!index.weights().is_empty());
+        // A document embedded through the parsed index matches what was
+        // written — the weights survived the round trip.
+        assert_eq!(index.embed("mercy and praise"), index.vector(0).unwrap());
+    }
+
+    /// An unsorted table would break the binary search, so it is refused.
+    #[test]
+    fn an_unsorted_weight_table_is_a_data_error() {
+        let weights = Weights {
+            default: 1.0,
+            table: vec![(9_000, 1.0), (10, 2.0)],
+        };
+        let bytes = build_weighted(64, &[(key(1, 1), "mercy")], &weights);
+        let error = Index::parse("test.qv", &bytes).unwrap_err();
+        assert_eq!(error.code(), "QQL_INVALID_DATA_FILE");
+    }
+
+    /// Embedder 1 files predate the table and must keep working untouched.
+    #[test]
+    fn an_unweighted_index_still_parses() {
+        let bytes = build(64, &[(key(1, 1), "mercy")]);
+        let index = Index::parse("test.qv", &bytes).unwrap();
+        assert_eq!(index.embedder(), Embedder::Hashed);
+        assert!(index.weights().is_empty());
+        assert_eq!(index.embed("mercy"), hashed_embed("mercy", 64));
     }
 }

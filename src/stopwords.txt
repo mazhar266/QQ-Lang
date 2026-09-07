@@ -1,0 +1,51 @@
+# English stopwords, shared by src/search.rs (include_str!) and
+# scripts/build-vectors.py. One word per line, folded (lowercase).
+#
+# Single-sourced because both sides must agree: the vector build gives these
+# zero weight, and the query path drops them before embedding. A list that
+# drifted between the two would quietly change every score.
+a
+an
+and
+are
+as
+at
+be
+but
+by
+for
+from
+had
+has
+have
+he
+her
+him
+his
+i
+in
+is
+it
+its
+me
+my
+of
+on
+or
+our
+that
+the
+their
+them
+then
+there
+they
+this
+to
+was
+we
+were
+will
+with
+you
+your

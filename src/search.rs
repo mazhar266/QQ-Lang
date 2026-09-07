@@ -134,14 +134,14 @@ const ALIASES: &[&[&str]] = &[
 
 /// English words that carry no signal in a query.
 ///
-/// Used only to *drop terms from a query*, never to strip the index — phrases
-/// still need them in place, and `?'"the straight path"'` must keep matching.
-const STOPWORDS: &[&str] = &[
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "had", "has", "have",
-    "he", "her", "him", "his", "i", "in", "is", "it", "its", "me", "my", "of", "on", "or", "our",
-    "that", "the", "their", "them", "then", "there", "they", "this", "to", "was", "we", "were",
-    "will", "with", "you", "your",
-];
+/// Read from `stopwords.txt` so the vector build script can use the same list
+/// — it gives these zero weight when embedding, and a list that drifted
+/// between the two sides would silently change every score.
+///
+/// Used only to drop terms from a *query* and to zero them when *embedding*,
+/// never to strip the full-text index: phrases still need them in place, so
+/// `?'"the straight path"'` keeps matching.
+const STOPWORDS: &str = include_str!("stopwords.txt");
 
 /// Other spellings of `word`, including `word` itself. Empty when there are
 /// none, which is the common case.
@@ -158,7 +158,9 @@ pub fn aliases(word: &str) -> &'static [&'static str] {
 
 /// Whether a word adds nothing to a query.
 pub fn is_stopword(word: &str) -> bool {
-    STOPWORDS.contains(&word)
+    STOPWORDS
+        .lines()
+        .any(|line| !line.starts_with('#') && line.trim() == word)
 }
 
 /// Whether a term is a plain bag of words, and so safe to rewrite.

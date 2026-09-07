@@ -199,4 +199,41 @@ mod with_the_feature {
         assert!(!records[0].extra.contains_key("ranked"));
         assert_eq!(records[1].extra["ranked"], true);
     }
+
+    /// The committed indexes carry token weights, and a document embedded at
+    /// query time reproduces the vector the build script wrote. That is the
+    /// one invariant the two implementations must hold: they are separate
+    /// code in separate languages projecting into the same space.
+    #[test]
+    fn the_build_script_and_the_runtime_embed_alike() {
+        let mut ctx = ctx!();
+
+        // 1:2, embedded from its own stored text, must find itself at ~1.0.
+        let text = ctx.execute("q:1:2").unwrap()[0].ar.clone();
+        let hits = ctx.execute(&format!("q:1:*\"{text}\"")).unwrap();
+
+        assert_eq!(hits[0].extra["ayah"], 2);
+        let score = hits[0].extra["score"].as_f64().unwrap();
+        assert!(
+            score > 0.98,
+            "the two embedders disagree: self-similarity is {score}"
+        );
+    }
+
+    /// IDF weighting is what pulls the ayah a phrase describes above one that
+    /// merely shares its commonest word.
+    #[test]
+    fn rare_words_outrank_common_ones() {
+        let mut ctx = ctx!();
+        let hits = ctx.execute(r#"q:*"quran is easy"~6"#).unwrap();
+
+        let surahs: Vec<u64> = hits
+            .iter()
+            .filter_map(|r| r.extra["surah"].as_u64())
+            .collect();
+        assert!(
+            surahs.iter().filter(|s| **s == 54).count() >= 3,
+            "al-Qamar should dominate: {surahs:?}"
+        );
+    }
 }

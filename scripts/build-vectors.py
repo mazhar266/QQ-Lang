@@ -13,6 +13,13 @@ token hashes onto four dimensions with a sign from its own hash, and the sum
 is L2-normalized and quantized to int8. The identical function lives in
 `src/vector.rs`, so a query embeds the same way at runtime.
 
+Tokens are **weighted** rather than counted equally (embedder 2): each is
+scaled by its inverse document frequency, a whole word outweighs one of its
+trigrams by WORD_WEIGHT, and stopwords are zeroed. The weights ship inside the
+`.qv` file keyed by token hash, so the runtime needs no vocabulary — see the
+format notes in `src/vector.rs`. Tokens seen in a single document are left out
+of the table: they all share the maximum IDF, which the default carries.
+
 That makes it **fuzzy lexical matching, not semantic**. Character trigrams
 give it tolerance for diacritics and for Arabic prefixes and suffixes, which
 is worth a lot, but it does not know that *charity* and *zakat* are related.
@@ -28,7 +35,9 @@ Usage
     python3 scripts/build-vectors.py --dims 512      # fewer collisions, bigger
 """
 import argparse
+import collections
 import json
+import math
 import os
 import struct
 import sys
@@ -39,6 +48,17 @@ OUT = os.path.join(SOURCES, 'vectors')
 
 MAGIC = b'QQLVEC1\n'
 EMBEDDER_HASHED = 1
+EMBEDDER_HASHED_IDF = 2
+
+# Must match src/vector.rs::WORD_WEIGHT.
+WORD_WEIGHT = 3.0
+
+# Must match src/search.rs — both read this file, so the list cannot drift.
+STOPWORDS = {
+    line.strip()
+    for line in open(os.path.join(ROOT, 'src/stopwords.txt'), encoding='utf-8')
+    if line.strip() and not line.startswith('#')
+}
 
 LANG_AR = 0
 LANG_EN = 1
@@ -73,7 +93,7 @@ def fold(text):
 
 
 def tokens(text):
-    """Words plus character trigrams — must match src/vector.rs::tokens."""
+    """(token, is_word) pairs — must match src/vector.rs::tokens."""
     out = []
     word = []
     for ch in fold(text) + ' ':
@@ -81,12 +101,22 @@ def tokens(text):
             word.append(ch)
             continue
         if word:
-            out.append(''.join(word))
+            out.append((''.join(word), True))
             if len(word) > 3:
                 for i in range(len(word) - 2):
-                    out.append(''.join(word[i:i + 3]))
+                    out.append((''.join(word[i:i + 3]), False))
             word = []
     return out
+
+
+def f32(value):
+    """Round through IEEE-754 single precision.
+
+    The table ships as f32, so the document vectors must be built from the
+    same rounded values the runtime will read back — otherwise the two sides
+    weigh tokens fractionally differently for no reason.
+    """
+    return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
 def fnv1a(token):
@@ -96,14 +126,33 @@ def fnv1a(token):
     return acc
 
 
-def embed(text, dims):
+def embed(text, dims, weights=None, default=1.0):
+    """Project tokens onto `dims`. `weights` maps token hash to its IDF."""
     acc = [0.0] * dims
-    for token in tokens(text):
+    for token, is_word in tokens(text):
+        if weights is not None and token in STOPWORDS:
+            continue
         h = fnv1a(token)
+        if weights is None:
+            scale = 1.0
+        else:
+            scale = weights.get(h, default) * (WORD_WEIGHT if is_word else 1.0)
+            if scale == 0.0:
+                continue
         for _ in range(4):
-            acc[h % dims] += -1.0 if h & 0x8000000000000000 else 1.0
+            acc[h % dims] += (-scale if h & 0x8000000000000000 else scale)
             h = ((h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF) ^ (h >> 29)
     return quantize(acc)
+
+
+def document_frequencies(texts):
+    """{token hash: documents containing it} plus the document count."""
+    df = collections.Counter()
+    total = 0
+    for text in texts:
+        total += 1
+        df.update({fnv1a(t) for t, _ in tokens(text)})
+    return df, total
 
 
 def quantize(values):
@@ -187,28 +236,47 @@ CORPORA = {
 
 
 def build(code, dims):
-    rows = []
+    # One text per (record, field). Collected first because the weights are a
+    # property of the whole corpus, so nothing can be embedded until every
+    # document has been counted.
+    texts = []
     for primary, number, arabic, english, *rest in CORPORA[code]():
         emlaei = rest[0] if rest else ''
-        # One vector per field present. A record indexed several times is
-        # merged back to one hit at query time, scored by whichever matched.
+        # A record indexed several times is merged back to one hit at query
+        # time, scored by whichever field matched.
         if arabic.strip():
-            rows.append((primary, number, LANG_AR, embed(arabic, dims)))
+            texts.append((primary, number, LANG_AR, arabic))
         if english.strip():
-            rows.append((primary, number, LANG_EN, embed(english, dims)))
+            texts.append((primary, number, LANG_EN, english))
         if emlaei.strip():
-            rows.append((primary, number, LANG_EM, embed(emlaei, dims)))
+            texts.append((primary, number, LANG_EM, emlaei))
 
-    if not rows:
-        return None
+    if not texts:
+        return None, 0
+
+    df, total = document_frequencies(t for _, _, _, t in texts)
+    # Smoothed IDF, always positive. A token in one document only takes the
+    # maximum, which is the default and is left out of the table.
+    idf = lambda n: f32(math.log(1.0 + total / n))
+    default = idf(1)
+    weights = {h: idf(n) for h, n in df.items() if n > 1}
+
+    rows = [
+        (primary, number, lang, embed(text, dims, weights, default))
+        for primary, number, lang, text in texts
+    ]
 
     out = bytearray(MAGIC)
-    out += struct.pack('<IIII', dims, len(rows), EMBEDDER_HASHED, 0)
+    out += struct.pack('<IIII', dims, len(rows), EMBEDDER_HASHED_IDF, len(weights))
     for primary, number, lang, _ in rows:
         out += struct.pack('<III', primary, number, lang)
     for _, _, _, vector in rows:
         out += bytes((v & 0xFF) for v in vector)
-    return bytes(out)
+    # The runtime binary-searches this, so it must be sorted by hash.
+    out += struct.pack('<f', default)
+    for h in sorted(weights):
+        out += struct.pack('<Qf', h, weights[h])
+    return bytes(out), len(weights)
 
 
 def main():
@@ -237,7 +305,7 @@ def main():
     total = 0
     for code in codes:
         code = code.upper()
-        payload = build(code, args.dims)
+        payload, weighted = build(code, args.dims)
         if payload is None:
             print(f'{code:>3}: no data, skipped')
             continue
@@ -246,7 +314,8 @@ def main():
             f.write(payload)
         vectors = struct.unpack('<I', payload[12:16])[0]
         total += len(payload)
-        print(f'{code:>3}: {vectors:6d} vectors  {len(payload) / 1e6:6.2f} MB  {path}')
+        print(f'{code:>3}: {vectors:6d} vectors  {weighted:6d} weights  '
+              f'{len(payload) / 1e6:6.2f} MB  {path}')
 
     print(f'total {total / 1e6:.2f} MB in {OUT}')
     return 0

@@ -275,21 +275,41 @@ words plus character trigrams, hashed onto 256 dimensions, normalized and
 quantized to `int8`. No model, no weights, no asset beyond the index itself,
 and query embedding is a handful of hashes rather than a transformer.
 
-That makes it **fuzzy lexical matching, not semantic**. It tolerates
+Tokens are **weighted, not counted**. Each is scaled by its inverse document
+frequency, a whole word outweighs one of its own trigrams three to one, and
+stopwords are zeroed. Without that, *is* weighed what *quran* weighed and a
+five-letter word voted four times — once as itself, three times as its
+trigrams:
+
+```text
+q:*"quran is easy"~6      unweighted        weighted
+  1.                      36:2  wise Qur'an   74:10 not easy
+  2.                      56:77 noble Qur'an  54:17 made the Qur'an easy ←
+  3.                      50:1  honored       54:22 …
+  …                       54:17 at rank 11    54:32, 54:40 at 4 and 5
+```
+
+The weights ride inside the `.qv` file, keyed by token hash rather than by
+word, so there is still no vocabulary to ship — about 0.3 MB per source, since
+tokens seen in a single document all share the maximum IDF and are left out.
+
+That still makes it **fuzzy lexical matching, not semantic**. It tolerates
 diacritics, prefixes and suffixes — which is worth a great deal for Arabic —
 but it does not know that *charity* and *zakat* are related, and a nonsense
-query returns weak noise rather than nothing.
+query returns weak noise rather than nothing. For a phrase describing an ayah
+rather than quoting it, `?"…"` is the better tool.
 
 Real semantic vectors are a build-time swap: emit an index with a different
 embedder id and teach [src/vector.rs](src/vector.rs) to embed queries the same
 way. The file format, the scan, the scoping and the result shape are all
-unchanged by that.
+unchanged by that — which is exactly how the weighted embedder above was added
+alongside the original one rather than replacing it.
 
 #### Cost
 
 | | |
 | --- | --- |
-| Index size | ~3.3 MB Quran, ~21 MB all eight sources |
+| Index size | ~5.3 MB Quran, ~33 MB all 18 sources (weights included) |
 | Query | hash the term, then a flat `int8` dot-product scan |
 | Structure | none — no ANN index, nothing to fall out of sync |
 
