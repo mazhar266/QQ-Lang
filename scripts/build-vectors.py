@@ -42,9 +42,15 @@ EMBEDDER_HASHED = 1
 
 LANG_AR = 0
 LANG_EN = 1
+# Simplified (Emlaei) Arabic. Only the Quran has one today: its `ar` is
+# Uthmani, whose rasm differs from modern spelling by more than folding can
+# absorb, so the second spelling gets its own vectors.
+LANG_EM = 2
 
 # Must match src/search.rs::fold.
-DROP = set(range(0x064B, 0x0653)) | {0x0670, 0x0640} | set(range(0x06D6, 0x06EE))
+DROP = (set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
+        | set(range(0x06D6, 0x06EE))
+        | set(range(0x200C, 0x2010)) | {0x061C})
 ALEF = {0x0622: 'ا', 0x0623: 'ا', 0x0625: 'ا', 0x0671: 'ا'}
 SWAP = {0x0649: 'ي', 0x0629: 'ه'}
 
@@ -110,8 +116,9 @@ def quantize(values):
 
 
 # --- corpora ----------------------------------------------------------------
-# Each reader yields (primary, number, arabic, english). The numbering must be
-# the one QQL resolves with, since hits are looked up as SOURCE:primary:number.
+# Each reader yields (primary, number, arabic, english) and may append a fifth
+# element, the simplified Arabic spelling. The numbering must be the one QQL
+# resolves with, since hits are looked up as SOURCE:primary:number.
 
 def read_quran():
     base = os.path.join(SOURCES, 'quran/chapters')
@@ -119,7 +126,8 @@ def read_quran():
         with open(f'{base}/{surah}.json', encoding='utf-8') as f:
             chapter = json.load(f)
         for verse in chapter['verses']:
-            yield surah, verse['id'], verse['text'], verse.get('translation', '')
+            yield (surah, verse['id'], verse['text'],
+                   verse.get('translation', ''), verse.get('emlaei', ''))
 
 
 def read_hadith(directory):
@@ -178,13 +186,16 @@ CORPORA = {
 
 def build(code, dims):
     rows = []
-    for primary, number, arabic, english in CORPORA[code]():
-        # One vector per language present. A record indexed twice is merged
-        # back to one hit at query time, scored by whichever field matched.
+    for primary, number, arabic, english, *rest in CORPORA[code]():
+        emlaei = rest[0] if rest else ''
+        # One vector per field present. A record indexed several times is
+        # merged back to one hit at query time, scored by whichever matched.
         if arabic.strip():
             rows.append((primary, number, LANG_AR, embed(arabic, dims)))
         if english.strip():
             rows.append((primary, number, LANG_EN, embed(english, dims)))
+        if emlaei.strip():
+            rows.append((primary, number, LANG_EM, embed(emlaei, dims)))
 
     if not rows:
         return None

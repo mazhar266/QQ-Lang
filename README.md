@@ -495,6 +495,7 @@ assert_eq!(query.references.len(), 1);
       "surah_name_en": "Al-Baqarah",
       "ayah": 255,
       "ar": "...",
+      "emlaei": "...",
       "en": "..."
     }
   ]
@@ -502,6 +503,27 @@ assert_eq!(query.references.len(), 1);
 ```
 
 Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`.
+
+### Two Arabic spellings
+
+The Quran also carries `emlaei`, the simplified spelling, beside the Uthmani `ar`.
+They differ in the consonantal skeleton and not merely in marks — `ٱلصَّلَوٰةَ` against
+`الصلاة`, `ٱلْكِتَٰب` against `الكتاب` — so folding cannot turn one into the other, and a
+search typed in modern orthography would silently return nothing for some of the most
+common words in the text. All three engines search both spellings and the English:
+
+```text
+q:"الكتاب"          162 ayat   (stored as ٱلْكِتَٰب)
+q:?"الصلاة"~20      ranked     (stored as ٱلصَّلَوٰةَ)
+q:*"الحياة"~5       ranked     (stored as ٱلْحَيَوٰةِ)
+```
+
+`ar` is unchanged — the mushaf text is what a record returns and what `--data` ships.
+Sources with a single spelling leave `emlaei` empty, and it is then omitted from the
+JSON, so hadith and Hisnul Muslim records are byte-identical to before.
+
+One caveat about the supplied text: it keeps a few classical spellings, most visibly
+`السموات` rather than `السماوات`. Search that word the way the data writes it.
 
 Errors are still valid JSON, never a malformed string:
 
@@ -732,13 +754,15 @@ resolves are included.
 `sources/quran/` is built by [scripts/build-quran.py](scripts/build-quran.py) and committed:
 
 ```bash
-python3 scripts/build-quran.py            # fetch Tanzil, rebuild
-python3 scripts/build-quran.py --check    # verify only, write nothing
+python3 scripts/build-quran.py --meta DIR            # fetch Tanzil, rebuild
+python3 scripts/build-quran.py --meta DIR --check    # verify only, write nothing
 ```
 
 The Arabic comes from **Tanzil's Uthmani text**; names, the English translation and
 the per-ayah transliteration still come from the `quran-json-arabic` project,
-fetched only when rebuilding.
+fetched only when rebuilding. The simplified `emlaei` spelling is read from the
+committed `sources/hafs_smart_v8.json` — small enough to carry, and pairing scripture
+with the wrong ayah is not something a network fetch should be able to do quietly.
 
 The split exists because that package spells three marks with codepoints that mean
 something else in Unicode — `U+0657 INVERTED DAMMA` for an open fathatan, `U+065E` for
@@ -746,6 +770,12 @@ a dammatan, `U+0656` for a kasratan. A font that follows Unicode draws them lite
 so 2:286's `إِصْرًا` gains a damma above the reh and reads *isru* rather than *isran*.
 Tanzil uses the standard marks and carries the pause, sajdah and silence signs the
 package omits.
+
+It also refuses to write unless every ayah's Emlaei spelling lines up with its Uthmani
+one. Since the two rasms disagree only about alef, waw and ya, a skeleton with those
+letters removed is nearly identical for a correctly paired ayah: 1.3% differ, against
+100% for an off-by-one pairing, so the 5% limit catches a shifted file with room to
+spare.
 
 The generator refuses to write unless the two texts agree: same ayah counts per surah,
 no misused codepoint in the output, the basmalah stripped from exactly the 112 surahs

@@ -290,6 +290,7 @@ impl Source for JsonSource {
                 source: self.spec.code.clone(),
                 collection: self.spec.name.clone(),
                 extra,
+                emlaei: String::new(),
                 ar: text(item, &self.spec.ar),
                 en: text(item, &self.spec.en),
             });
@@ -354,6 +355,7 @@ impl JsonSource {
                 source: self.spec.code.clone(),
                 collection: self.spec.name.clone(),
                 extra,
+                emlaei: String::new(),
                 ar: text(item, &self.spec.ar),
                 en: text(item, &self.spec.en),
             });

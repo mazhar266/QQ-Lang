@@ -13,6 +13,15 @@
 //! 2:286 read *isru* instead of *isran* in any font that follows Unicode.
 //! Names, translation and transliteration still come from that project, which
 //! is fetched on demand when rebuilding rather than carried as a submodule.
+//!
+//! # Two spellings
+//!
+//! Each verse carries the Uthmani text as `ar` and the simplified **Emlaei**
+//! spelling as `emlaei`. They differ in the consonantal skeleton, not only in
+//! marks — `ٱلصَّلَوٰةَ` against `الصلاة`, `ٱلْكِتَٰب` against `الكتاب` — so folding
+//! cannot turn one into the other and a search typed in modern orthography
+//! would miss those words entirely. Both are indexed; the mushaf text is what
+//! is returned as `ar`, unchanged.
 
 use crate::ast::Reference;
 use crate::error::Error;
@@ -84,6 +93,14 @@ struct Verse {
     id: u32,
     text: String,
     translation: String,
+    /// Simplified (Emlaei) spelling, from `sources/hafs_smart_v8.json`.
+    ///
+    /// `default` rather than required so an older data directory — a release
+    /// bundle cut before this field existed — still resolves. The ayah then
+    /// carries no second spelling and search simply does not match on one,
+    /// which beats refusing to read the mushaf at all.
+    #[serde(default)]
+    emlaei: String,
 }
 
 impl Source for Quran {
@@ -152,6 +169,7 @@ impl Source for Quran {
                 .into_iter()
                 .collect(),
                 ar: verse.text.clone(),
+                emlaei: verse.emlaei.clone(),
                 en: verse.translation.clone(),
             });
         }
@@ -205,6 +223,7 @@ impl Quran {
                 .into_iter()
                 .collect(),
                 ar: verse.text.clone(),
+                emlaei: verse.emlaei.clone(),
                 en: verse.translation.clone(),
             });
         }

@@ -381,6 +381,7 @@ impl Context {
         let folded = crate::search::fold(needle);
         out.extend(candidates.into_iter().filter(|record| {
             crate::search::matches(&record.ar, &folded)
+                || crate::search::matches(&record.emlaei, &folded)
                 || crate::search::matches(&record.en, &folded)
         }));
 

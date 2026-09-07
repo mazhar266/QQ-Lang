@@ -32,6 +32,13 @@
 //! fully diacritized, and an inverted index over raw diacritized tokens would
 //! only ever match a query that reproduced every mark. English is indexed with
 //! tantivy's `en_stem` tokenizer.
+//!
+//! A third field, `emlaei`, carries the simplified Arabic spelling where a
+//! source has one — today only the Quran. Folding cannot bridge Uthmani and
+//! modern orthography, since they differ in the letters themselves, so the
+//! second spelling is indexed as its own field and searched alongside the
+//! other two. Indexes built before it existed simply lack the field; they open
+//! and search on `ar` and `en` as they always did.
 
 use crate::context::Context;
 use crate::error::Error;
@@ -62,12 +69,24 @@ pub struct Report {
     pub path: PathBuf,
 }
 
-/// The fields every QQL index carries.
+/// The fields a QQL index carries.
 struct Fields {
     primary: Field,
     number: Field,
     arabic: Field,
+    /// Simplified Arabic spelling. `None` for an index built before this
+    /// field existed — such an index still opens and searches `ar` and `en`.
+    emlaei: Option<Field>,
     english: Field,
+}
+
+/// Text field options: `tokenizer`, positions kept so phrases work.
+fn text(tokenizer: &str) -> TextOptions {
+    TextOptions::default().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer(tokenizer)
+            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+    )
 }
 
 fn schema() -> (Schema, Fields) {
@@ -77,22 +96,9 @@ fn schema() -> (Schema, Fields) {
     let primary = builder.add_u64_field("primary", INDEXED | STORED | FAST);
     let number = builder.add_u64_field("number", INDEXED | STORED | FAST);
 
-    let arabic = builder.add_text_field(
-        "ar",
-        TextOptions::default().set_indexing_options(
-            TextFieldIndexing::default()
-                .set_tokenizer("default")
-                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-        ),
-    );
-    let english = builder.add_text_field(
-        "en",
-        TextOptions::default().set_indexing_options(
-            TextFieldIndexing::default()
-                .set_tokenizer("en_stem")
-                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-        ),
-    );
+    let arabic = builder.add_text_field("ar", text("default"));
+    let emlaei = builder.add_text_field("emlaei", text("default"));
+    let english = builder.add_text_field("en", text("en_stem"));
 
     let schema = builder.build();
     (
@@ -101,9 +107,31 @@ fn schema() -> (Schema, Fields) {
             primary,
             number,
             arabic,
+            emlaei: Some(emlaei),
             english,
         },
     )
+}
+
+/// Resolve field handles from an index's *own* schema, by name.
+///
+/// Reading them from a freshly built schema instead would hand out handles
+/// that are simply positions, so adding a field would silently misaddress
+/// every index already on disk.
+fn fields_of(schema: &Schema, path: &Path) -> Result<Fields, Error> {
+    let get = |name: &str| {
+        schema.get_field(name).map_err(|_| Error::InvalidDataFile {
+            path: path.display().to_string(),
+            detail: format!("index has no `{name}` field; rebuild it with qql-index"),
+        })
+    };
+    Ok(Fields {
+        primary: get("primary")?,
+        number: get("number")?,
+        arabic: get("ar")?,
+        emlaei: schema.get_field("emlaei").ok(),
+        english: get("en")?,
+    })
 }
 
 fn index_path(data: &Path, code: &str) -> PathBuf {
@@ -154,14 +182,18 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
 
         for (offset, record) in records.iter().enumerate() {
             let number = offset as u64 + 1;
-            writer
-                .add_document(doc!(
-                    fields.primary => u64::from(primary),
-                    fields.number => number,
-                    fields.arabic => crate::search::fold(&record.ar),
-                    fields.english => record.en.clone(),
-                ))
-                .map_err(|e| wrap(e, &path))?;
+            let mut document = doc!(
+                fields.primary => u64::from(primary),
+                fields.number => number,
+                fields.arabic => crate::search::fold(&record.ar),
+                fields.english => record.en.clone(),
+            );
+            // Only the sources that have a second spelling carry one; an empty
+            // value would just add a term-less field to every other document.
+            if let (Some(field), false) = (fields.emlaei, record.emlaei.is_empty()) {
+                document.add_text(field, crate::search::fold(&record.emlaei));
+            }
+            writer.add_document(document).map_err(|e| wrap(e, &path))?;
             documents += 1;
         }
     }
@@ -201,9 +233,14 @@ impl Searcher {
         }
 
         let index = Index::open_in_dir(&path).map_err(|e| wrap(e, &path))?;
-        let (_, fields) = schema();
+        let fields = fields_of(&index.schema(), &path)?;
         let reader = index.reader().map_err(|e| wrap(e, &path))?;
-        let mut parser = QueryParser::for_index(&index, vec![fields.arabic, fields.english]);
+
+        // Every text field is a default field, so a bare term reaches the
+        // Arabic, the simplified spelling and the English alike.
+        let mut defaults = vec![fields.arabic, fields.english];
+        defaults.extend(fields.emlaei);
+        let mut parser = QueryParser::for_index(&index, defaults);
         // A bare term should match either language, not require both.
         parser.set_conjunction_by_default();
         parser.set_field_boost(fields.english, 1.0);

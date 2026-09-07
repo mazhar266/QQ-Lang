@@ -216,6 +216,7 @@ impl Source for HadithCollection {
                 ]
                 .into_iter()
                 .collect(),
+                emlaei: String::new(),
                 ar: hadith.arabic.clone(),
                 en: hadith.english.text.clone(),
             });

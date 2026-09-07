@@ -10,19 +10,28 @@
 //!
 //! # Matching
 //!
-//! A record matches when the folded needle appears in its folded Arabic or its
-//! folded English. Folding lowercases ASCII and, for Arabic, drops the marks
-//! that a reader would not type:
+//! A record matches when the folded needle appears in any of its folded text
+//! fields — Arabic, the simplified `emlaei` spelling where a source has one,
+//! or English. Folding lowercases ASCII and, for Arabic, drops the marks that
+//! a reader would not type:
 //!
 //! - harakat and sukun (`U+064B..U+0652`), the superscript alef (`U+0670`),
 //!   and the Quranic annotation marks (`U+06D6..U+06ED`);
 //! - tatweel (`U+0640`);
+//! - the invisible joiners and bidi marks (`U+200C..U+200F`, `U+061C`), which
+//!   nobody types and which five ayat of the Emlaei text carry mid-sentence;
 //! - the hamza and madda seats on alef, so `أ`, `إ`, `آ`, `ٱ` all fold to `ا`;
 //! - `ى` to `ي` and `ة` to `ه`, which are written interchangeably.
 //!
 //! Without that, searching the Quran would be nearly useless: the text is
 //! fully diacritized, so a typed `الحمد` shares no substring with the stored
 //! `ٱلْحَمْدُ`.
+//!
+//! Folding goes only so far, which is why `Record::emlaei` exists. Uthmani and
+//! modern spelling differ in the letters themselves — `ٱلصَّلَوٰةَ` keeps a waw
+//! where `الصلاة` has an alef, and no amount of mark-dropping bridges that.
+//! Matching the second spelling as well is what makes `"السماوات"` find the
+//! 185 ayat that store it as `ٱلسَّمَٰوَٰتِ`.
 //!
 //! Folding happens only for comparison. Records are returned with their text
 //! exactly as stored — this module never rewrites scripture.
@@ -35,6 +44,8 @@ pub fn fold(text: &str) -> String {
         match ch {
             // Marks a reader would not type.
             '\u{064B}'..='\u{0652}' | '\u{0670}' | '\u{06D6}'..='\u{06ED}' | '\u{0640}' => {}
+            // Invisible formatting: joiners and bidi controls.
+            '\u{200C}'..='\u{200F}' | '\u{061C}' => {}
             // Alef, however it is seated.
             '\u{0622}' | '\u{0623}' | '\u{0625}' | '\u{0671}' => out.push('\u{0627}'),
             // Alef maqsura is written for ya, ta marbuta for ha.

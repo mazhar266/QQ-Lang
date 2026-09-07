@@ -224,4 +224,17 @@ mod with_the_feature {
         assert!(!records[0].extra.contains_key("ranked"));
         assert_eq!(records[1].extra["ranked"], true);
     }
+
+    /// The ranked engine reaches the second spelling too — `الصلاة` is stored
+    /// as `ٱلصَّلَوٰةَ`, a waw where the query has an alef.
+    #[test]
+    fn modern_spelling_is_indexed_alongside_the_uthmani() {
+        let Some(mut ctx) = context() else { return };
+        let Ok(hits) = ctx.execute(r#"q:?"الصلاة"~20"#) else {
+            return;
+        };
+        assert!(!hits.is_empty(), "the Emlaei field is not indexed");
+        assert!(hits.iter().all(|r| !r.ar.contains("الصلاة")));
+        assert!(hits.iter().any(|r| r.emlaei.contains("الصلاة")));
+    }
 }

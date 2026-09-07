@@ -198,6 +198,7 @@ impl Source for HisnulMuslim {
                 source: self.code().to_string(),
                 collection: self.name().to_string(),
                 extra,
+                emlaei: String::new(),
                 ar: item.arabic().to_string(),
                 en: item.english().to_string(),
             });
@@ -257,6 +258,7 @@ impl HisnulMuslim {
                 source: self.code().to_string(),
                 collection: self.name().to_string(),
                 extra,
+                emlaei: String::new(),
                 ar: item.arabic().to_string(),
                 en: item.english().to_string(),
             });

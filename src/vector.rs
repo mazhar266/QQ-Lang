@@ -40,6 +40,7 @@
 //! 16  embedder  u32      1 = hashed
 //! 20  reserved  u32
 //! 24  keys      count × { u32 primary, u32 number, u32 lang }
+//!                         lang: 0 Arabic, 1 English, 2 Emlaei
 //! ..  vectors   count × dims × i8, L2-normalized then scaled by 127
 //! ```
 //!
@@ -98,7 +99,12 @@ pub struct Key {
     pub primary: u32,
     /// Ayah or item within that primary.
     pub number: u32,
-    /// Which field this vector came from: 0 Arabic, 1 English.
+    /// Which field this vector came from: 0 Arabic, 1 English, 2 the
+    /// simplified (Emlaei) Arabic spelling.
+    ///
+    /// Informational — the scan keeps one hit per `(primary, number)`
+    /// whichever field scored best, so a new field id needs no code change
+    /// here, only vectors that carry it.
     pub lang: u32,
 }
 

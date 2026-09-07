@@ -5,18 +5,18 @@
   },
   "segments": [
     {
-      "segment_id": "f1df1c1c-bb4d-4a08-a9a4-81aca1059a7b",
-      "max_doc": 20,
+      "segment_id": "a2d9daf2-d4dc-49c9-8c06-4d6d194584f7",
+      "max_doc": 25,
       "deletes": null
     },
     {
-      "segment_id": "8211eeed-8262-437f-a2bb-86722551685b",
-      "max_doc": 14,
+      "segment_id": "726f4fd1-29b3-4bda-8228-82a6f7396b58",
+      "max_doc": 10,
       "deletes": null
     },
     {
-      "segment_id": "7fe5100b-4a5f-46a5-b29e-e92f0ba4a951",
-      "max_doc": 8,
+      "segment_id": "afbf23b3-9ba3-4e8b-9603-c6987d11fe04",
+      "max_doc": 7,
       "deletes": null
     }
   ],
@@ -43,6 +43,19 @@
     },
     {
       "name": "ar",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": false,
+        "fast": false
+      }
+    },
+    {
+      "name": "emlaei",
       "type": "text",
       "options": {
         "indexing": {

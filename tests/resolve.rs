@@ -649,6 +649,58 @@ fn the_forties_address_the_same_hadith_both_ways() {
     }
 }
 
+/// The Quran carries both spellings: Uthmani as `ar`, Emlaei as `emlaei`.
+/// Sources with only one spelling leave the field empty, and it is then
+/// omitted from the JSON, so their records are unchanged on the wire.
+#[test]
+fn the_quran_carries_both_spellings() {
+    let mut ctx = ctx!();
+
+    let ayah = &ctx.execute("q:1:2").unwrap()[0];
+    // Uthmani: alef wasla and superscript alef, exactly as the mushaf writes.
+    assert!(
+        ayah.ar.contains('\u{0671}'),
+        "ar is not Uthmani: {}",
+        ayah.ar
+    );
+    assert_eq!(ayah.emlaei, "الحمد لله رب العالمين");
+
+    let hadith = &ctx.execute("b:1:1").unwrap()[0];
+    assert!(hadith.emlaei.is_empty());
+
+    let value = ctx.execute_value("b:1:1");
+    assert!(
+        value["results"][0].get("emlaei").is_none(),
+        "an empty second spelling must not reach the JSON"
+    );
+    assert!(ctx.execute_value("q:1:2")["results"][0]["emlaei"].is_string());
+}
+
+/// The point of carrying Emlaei: words whose Uthmani rasm differs by a letter,
+/// which no amount of folding can bridge. Each of these returns nothing when
+/// only `ar` is searched.
+#[test]
+fn modern_spelling_finds_ayat_the_uthmani_rasm_hides() {
+    let mut ctx = ctx!();
+
+    for (needle, least) in [
+        ("الكتاب", 100),
+        ("الصلاة", 50),
+        ("الحياة", 50),
+        ("إبراهيم", 50),
+    ] {
+        let hits = ctx.execute(&format!("q:\"{needle}\"")).unwrap();
+        assert!(hits.len() >= least, "{needle}: only {} hits", hits.len());
+        // It matched the second spelling, not the mushaf text — otherwise
+        // this test would pass even with the field removed.
+        assert!(
+            hits.iter().all(|r| !r.ar.contains(needle)),
+            "{needle} appears in the Uthmani text; pick a word that does not"
+        );
+        assert!(hits.iter().any(|r| r.emlaei.contains(needle)), "{needle}");
+    }
+}
+
 /// The canonical space has holes — front matter and lettered variants. Alone
 /// they error; inside a range they are skipped, so walking the whole book
 /// (which is exactly what unscoped search does) never trips.
