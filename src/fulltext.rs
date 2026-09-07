@@ -28,10 +28,28 @@
 //! the vector index uses — so a hit resolves back through the ordinary
 //! reference path and comes out shaped like every other record.
 //!
-//! Arabic is indexed **folded** (see [`crate::search::fold`]): the corpus is
-//! fully diacritized, and an inverted index over raw diacritized tokens would
-//! only ever match a query that reproduced every mark. English is indexed with
-//! tantivy's `en_stem` tokenizer.
+//! **Every field is indexed folded** (see [`crate::search::fold`]), English
+//! included, and the query is folded the same way. Arabic needs it because the
+//! corpus is fully diacritized and an index over raw diacritized tokens would
+//! only match a query reproducing every mark. English needs it for the
+//! apostrophes: tantivy splits on non-alphanumerics, so an unfolded `Qur'an`
+//! indexed as `qur` + `an` could never be found by a search for `quran`.
+//! English then also runs through tantivy's `en_stem` tokenizer, which is what
+//! makes `?"mercy"` find *merciful*.
+//!
+//! # Query rewriting
+//!
+//! A *plain* term — no phrase, boolean or field syntax — has its stopwords
+//! dropped and its [aliases](crate::search::aliases) expanded before parsing,
+//! so `quran is easy` becomes `quran easy` and `koran` reaches the ayat that
+//! spell it `Qur'an`. Terms carrying syntax are passed through untouched:
+//! rewriting inside `"the straight path"` would change the question.
+//!
+//! Terms are combined with **OR**, not AND. Requiring every word means one
+//! unlucky token answers a natural-sounding query with nothing at all, which
+//! is what `?"quran is easy"` used to do. BM25 does the job instead — a
+//! document matching more of the rare words outranks one matching a single
+//! common word, and IDF makes any stopword that survives nearly weightless.
 //!
 //! A third field, `emlaei`, carries the simplified Arabic spelling where a
 //! source has one — today only the Quran. Folding cannot bridge Uthmani and
@@ -186,7 +204,7 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
                 fields.primary => u64::from(primary),
                 fields.number => number,
                 fields.arabic => crate::search::fold(&record.ar),
-                fields.english => record.en.clone(),
+                fields.english => crate::search::fold(&record.en),
             );
             // Only the sources that have a second spelling carry one; an empty
             // value would just add a term-less field to every other document.
@@ -207,6 +225,31 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
     }
 
     Ok(Report { documents, path })
+}
+
+/// Prepare a plain term: drop stopwords, expand known alternate spellings.
+///
+/// A term carrying phrase, boolean or field syntax is returned untouched — see
+/// [`crate::search::is_plain`].
+fn rewrite(folded: &str) -> String {
+    if !crate::search::is_plain(folded) {
+        return folded.to_string();
+    }
+
+    crate::search::without_stopwords(folded)
+        .split_whitespace()
+        .map(|word| {
+            let group = crate::search::aliases(word);
+            if group.is_empty() {
+                word.to_string()
+            } else {
+                // One clause per spelling. The word itself is in its own
+                // group, so it is never dropped by the rewrite.
+                format!("({})", group.join(" OR "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// An opened index, cached for the life of the context.
@@ -240,10 +283,9 @@ impl Searcher {
         // Arabic, the simplified spelling and the English alike.
         let mut defaults = vec![fields.arabic, fields.english];
         defaults.extend(fields.emlaei);
-        let mut parser = QueryParser::for_index(&index, defaults);
-        // A bare term should match either language, not require both.
-        parser.set_conjunction_by_default();
-        parser.set_field_boost(fields.english, 1.0);
+        // Left as OR: see the module docs. An explicit `AND` in the term
+        // still reaches tantivy and still means AND.
+        let parser = QueryParser::for_index(&index, defaults);
 
         Ok(Searcher {
             reader,
@@ -265,6 +307,7 @@ impl Searcher {
         // Fold for the same reason the index is folded: a diacritized corpus
         // will not match an undiacritized query otherwise.
         let folded = crate::search::fold(term);
+        let folded = rewrite(&folded);
         // The term carries its own boolean/phrase syntax, so a malformed one
         // is a bad query rather than an internal fault.
         let parsed = self

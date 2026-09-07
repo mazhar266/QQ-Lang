@@ -179,6 +179,29 @@ impl Context {
         })
     }
 
+    /// Query text for the embedder: stopwords dropped, alternate spellings
+    /// appended so their tokens are in the sum too.
+    ///
+    /// Only for plain terms — a phrase or boolean term is embedded as written.
+    #[cfg(feature = "vector")]
+    fn prepare(term: &str) -> String {
+        let folded = crate::search::fold(term);
+        if !crate::search::is_plain(&folded) {
+            return folded;
+        }
+
+        let mut out = crate::search::without_stopwords(&folded);
+        for word in out.clone().split_whitespace() {
+            for spelling in crate::search::aliases(word) {
+                if *spelling != word {
+                    out.push(' ');
+                    out.push_str(spelling);
+                }
+            }
+        }
+        out
+    }
+
     /// Resolve a similarity search against the source's vector index.
     ///
     /// The index is addressed by `(primary, number)`, so the scope filters
@@ -226,7 +249,12 @@ impl Context {
         };
 
         let limit = search.limit.unwrap_or(DEFAULT_LIMIT);
-        let query = index.embed(&search.term);
+        // The embedder sums token vectors, so a stopword is pure noise and an
+        // alternate spelling is a token the corpus may actually carry. Both
+        // are cheap to fix before embedding; the index needs no rebuild for
+        // either, which is the point of doing it here rather than at build
+        // time.
+        let query = index.embed(&Self::prepare(&search.term));
         let hits = index.nearest(&query, limit as usize, accept);
 
         for (key, score) in hits {
@@ -378,11 +406,22 @@ impl Context {
         let mut candidates = Vec::new();
         source.resolve(repo, &scope, &mut candidates)?;
 
+        // A single word may be spelled several ways — `koran` for `Qur'an`,
+        // `abraham` for `ibrahim`. Only single-word needles expand: a longer
+        // needle is a literal substring, and substituting inside one would
+        // produce a phrase nobody wrote.
         let folded = crate::search::fold(needle);
+        let needles: Vec<String> = match crate::search::aliases(&folded) {
+            [] => vec![folded],
+            group => group.iter().map(|w| (*w).to_string()).collect(),
+        };
+
         out.extend(candidates.into_iter().filter(|record| {
-            crate::search::matches(&record.ar, &folded)
-                || crate::search::matches(&record.emlaei, &folded)
-                || crate::search::matches(&record.en, &folded)
+            needles.iter().any(|needle| {
+                crate::search::matches(&record.ar, needle)
+                    || crate::search::matches(&record.emlaei, needle)
+                    || crate::search::matches(&record.en, needle)
+            })
         }));
 
         Ok(())

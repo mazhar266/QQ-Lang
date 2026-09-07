@@ -20,6 +20,13 @@
 //! - tatweel (`U+0640`);
 //! - the invisible joiners and bidi marks (`U+200C..U+200F`, `U+061C`), which
 //!   nobody types and which five ayat of the Emlaei text carry mid-sentence;
+//! - the apostrophes transliteration uses for hamza and ayn — `'`, `‘`, `’`,
+//!   backtick, `ʼ`, `ʻ`, `ʾ`, `ʿ`. Every tokenizer here splits on
+//!   non-alphanumerics, so leaving them in cut `Qur'an` into `qur` + `an` and
+//!   a search for `quran` matched neither. The corpus is not even consistent
+//!   with itself: it writes `qur'an` 199 times and `qur’an` 50, `rak'ahs`
+//!   beside `rak’ahs`, and `` `Asr `` with a backtick. Dropping the class
+//!   collapses all of them onto one token;
 //! - the hamza and madda seats on alef, so `أ`, `إ`, `آ`, `ٱ` all fold to `ا`;
 //! - `ى` to `ي` and `ة` to `ه`, which are written interchangeably.
 //!
@@ -46,6 +53,9 @@ pub fn fold(text: &str) -> String {
             '\u{064B}'..='\u{0652}' | '\u{0670}' | '\u{06D6}'..='\u{06ED}' | '\u{0640}' => {}
             // Invisible formatting: joiners and bidi controls.
             '\u{200C}'..='\u{200F}' | '\u{061C}' => {}
+            // Apostrophes: hamza and ayn in transliterated names.
+            '\'' | '`' | '\u{2018}' | '\u{2019}' | '\u{02BB}' | '\u{02BC}' | '\u{02BE}'
+            | '\u{02BF}' => {}
             // Alef, however it is seated.
             '\u{0622}' | '\u{0623}' | '\u{0625}' | '\u{0671}' => out.push('\u{0627}'),
             // Alef maqsura is written for ya, ta marbuta for ha.
@@ -65,6 +75,120 @@ pub fn fold(text: &str) -> String {
 /// Whether `haystack` contains `needle`, both folded.
 pub fn matches(haystack: &str, needle: &str) -> bool {
     !needle.is_empty() && fold(haystack).contains(needle)
+}
+
+/// Other spellings of a folded word — transliteration variants, and the
+/// English names the translations use for prophets.
+///
+/// Deliberately a short, curated list rather than a general scheme. The misses
+/// worth fixing here are a closed set: this corpus spells one name several
+/// ways, and a reader knows only one of them. Anything broader would start
+/// guessing at meaning, which is what the ranked engines are for.
+///
+/// Every entry is written folded, so `qur'an` does not appear — it already
+/// folds to `quran`. Words that risk colliding with ordinary English are left
+/// out on purpose: `lut`/`lot` and `ayyub`/`job` would both match common
+/// prose.
+const ALIASES: &[&[&str]] = &[
+    // Transliteration variants.
+    &["quran", "koran", "qoran"],
+    &["muhammad", "mohammed", "mohammad", "muhammed"],
+    &["salah", "salat", "salaat", "salaah"],
+    &["zakah", "zakat", "zakaat"],
+    &["kabah", "kaaba", "kaba"],
+    &["ramadan", "ramadhan", "ramzan"],
+    &["hadith", "hadeeth"],
+    &["sunnah", "sunna"],
+    &["wudu", "wudhu", "ablution"],
+    &["hajj", "haj", "pilgrimage"],
+    &["masjid", "mosque"],
+    &["jannah", "paradise"],
+    &["jahannam", "hellfire"],
+    &["shaytan", "satan", "shaitan"],
+    &["jibril", "gabriel", "jibreel"],
+    // Companions and wives, whose names the translations transliterate
+    // inconsistently.
+    &["aishah", "aisha", "ayesha"],
+    &["umar", "omar"],
+    &["uthman", "usman", "othman"],
+    &["abdullah", "abdallah"],
+    &["khadijah", "khadija"],
+    // Prophets: the Arabic name a reader types against the English name the
+    // translation prints.
+    &["ibrahim", "abraham"],
+    &["musa", "moses"],
+    &["isa", "jesus"],
+    &["maryam", "mary"],
+    &["yusuf", "joseph"],
+    &["dawud", "david"],
+    &["sulaiman", "solomon", "suleiman"],
+    &["nuh", "noah"],
+    &["harun", "aaron"],
+    &["yahya", "john"],
+    &["ismail", "ishmael"],
+    &["yaqub", "jacob"],
+    &["ishaq", "isaac"],
+    &["yunus", "jonah"],
+    &["zakariya", "zechariah"],
+];
+
+/// English words that carry no signal in a query.
+///
+/// Used only to *drop terms from a query*, never to strip the index — phrases
+/// still need them in place, and `?'"the straight path"'` must keep matching.
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "had", "has", "have",
+    "he", "her", "him", "his", "i", "in", "is", "it", "its", "me", "my", "of", "on", "or", "our",
+    "that", "the", "their", "them", "then", "there", "they", "this", "to", "was", "we", "were",
+    "will", "with", "you", "your",
+];
+
+/// Other spellings of `word`, including `word` itself. Empty when there are
+/// none, which is the common case.
+///
+/// A linear scan: the table is a few dozen entries and is checked once per
+/// query word.
+pub fn aliases(word: &str) -> &'static [&'static str] {
+    ALIASES
+        .iter()
+        .find(|group| group.contains(&word))
+        .copied()
+        .unwrap_or(&[])
+}
+
+/// Whether a word adds nothing to a query.
+pub fn is_stopword(word: &str) -> bool {
+    STOPWORDS.contains(&word)
+}
+
+/// Whether a term is a plain bag of words, and so safe to rewrite.
+///
+/// The full-text term carries its own boolean and phrase syntax straight
+/// through to tantivy. Dropping a stopword out of `"the straight path"` or
+/// expanding a word inside `title:x` would change what the user asked for, so
+/// anything carrying syntax is passed along untouched.
+pub fn is_plain(term: &str) -> bool {
+    !term.chars().any(|c| "\"()[]{}:+-^*?~\\/".contains(c))
+        && !term
+            .split_whitespace()
+            .any(|w| matches!(w, "AND" | "OR" | "NOT" | "TO" | "IN"))
+}
+
+/// Drop stopwords from a plain term, keeping the original if nothing is left.
+///
+/// `"quran is easy"` becomes `"quran easy"`. A query that is *only* stopwords
+/// is left alone — the user asked for something, and an empty query would
+/// answer with everything.
+pub fn without_stopwords(term: &str) -> String {
+    let kept: Vec<&str> = term
+        .split_whitespace()
+        .filter(|w| !is_stopword(w))
+        .collect();
+    if kept.is_empty() {
+        term.to_string()
+    } else {
+        kept.join(" ")
+    }
 }
 
 #[cfg(test)]
@@ -93,6 +217,39 @@ mod tests {
         assert!(matches("In the name of Allah", &fold("ALLAH")));
         assert!(!matches("In the name of Allah", &fold("Bukhari")));
         assert!(!matches("anything", &fold("")));
+    }
+
+    #[test]
+    fn folding_collapses_every_apostrophe_the_corpus_uses() {
+        // The corpus writes this name at least four ways.
+        for spelling in ["Qur'an", "Qur’an", "Qur`an", "Qurʼan", "Quran"] {
+            assert_eq!(fold(spelling), "quran", "{spelling}");
+        }
+        assert_eq!(fold("Allah's"), "allahs");
+        assert_eq!(fold("`Asr"), "asr");
+        assert_eq!(fold("rak’ahs"), fold("rak'ahs"));
+    }
+
+    #[test]
+    fn aliases_are_symmetric_and_rare() {
+        assert!(aliases("quran").contains(&"koran"));
+        assert!(aliases("koran").contains(&"quran"));
+        assert!(aliases("abraham").contains(&"ibrahim"));
+        // Ordinary words have none, which is the common path.
+        assert!(aliases("mercy").is_empty());
+        assert!(aliases("lot").is_empty(), "too collision-prone to alias");
+    }
+
+    #[test]
+    fn only_plain_terms_are_rewritten() {
+        assert!(is_plain("quran is easy"));
+        assert!(!is_plain("\"straight path\""));
+        assert!(!is_plain("mercy OR forgiveness"));
+        assert!(!is_plain("prayer -charity"));
+
+        assert_eq!(without_stopwords("quran is easy"), "quran easy");
+        // Nothing but stopwords: leave it be rather than match everything.
+        assert_eq!(without_stopwords("the is of"), "the is of");
     }
 
     #[test]

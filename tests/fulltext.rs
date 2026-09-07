@@ -237,4 +237,47 @@ mod with_the_feature {
         assert!(hits.iter().all(|r| !r.ar.contains("الصلاة")));
         assert!(hits.iter().any(|r| r.emlaei.contains("الصلاة")));
     }
+
+    /// The query that used to return nothing at all. Three separate faults
+    /// stacked: `Qur'an` tokenized as `qur` + `an` so the word never matched,
+    /// English was indexed unfolded so the query could not reach it either,
+    /// and conjunction-by-default turned one missing term into zero results.
+    #[test]
+    fn a_natural_phrase_finds_the_ayah_it_describes() {
+        let Some(mut ctx) = context() else { return };
+        let Ok(hits) = ctx.execute(r#"q:?"quran is easy"~3"#) else {
+            return;
+        };
+
+        assert!(!hits.is_empty(), "still zero results");
+        // 54:17, :22, :32, :40 all read "We have certainly made the Qur'an
+        // easy for remembrance" — any of them is the right answer.
+        assert!(
+            hits.iter().all(|r| r.extra["surah"] == 54),
+            "expected Surah al-Qamar, got {:?}",
+            hits.iter().map(|r| &r.extra["surah"]).collect::<Vec<_>>()
+        );
+    }
+
+    /// Terms are OR'd, so a word the corpus does not carry no longer erases
+    /// the whole query.
+    #[test]
+    fn one_unmatched_word_does_not_empty_the_result() {
+        let Some(mut ctx) = context() else { return };
+        let Ok(hits) = ctx.execute(r#"q:?"mercy zzzznotpresent"~5"#) else {
+            return;
+        };
+        assert!(!hits.is_empty(), "OR default is not in effect");
+    }
+
+    /// An alternate spelling reaches the text that uses the other one.
+    #[test]
+    fn alternate_spellings_reach_the_ranked_engine() {
+        let Some(mut ctx) = context() else { return };
+        let Ok(hits) = ctx.execute(r#"q:?"koran"~3"#) else {
+            return;
+        };
+        assert!(!hits.is_empty(), "koran did not reach Qur'an");
+        assert!(hits.iter().any(|r| r.en.to_lowercase().contains("qur")));
+    }
 }

@@ -207,13 +207,25 @@ q:?"prayer -charity"~3
 q:?'"straight path"'~3        phrase
 ```
 
-Arabic is indexed **folded** — the corpus is fully diacritized, and an index
-over raw tokens would only match a query reproducing every mark. English is
-indexed with tantivy's `en_stem` tokenizer.
+Every field is indexed **folded**, English included, and the query is folded
+the same way. Arabic needs it because the corpus is fully diacritized and an
+index over raw tokens would only match a query reproducing every mark. English
+needs it for the apostrophes — see below. English then also runs through
+tantivy's `en_stem` tokenizer, which is what makes `?"mercy"` find *merciful*.
+
+Terms are combined with **OR**, and BM25 ranks whatever matches most. An
+explicit `AND` still means AND. Requiring every word by default meant a single
+word the corpus spells differently answered a natural-sounding query with
+nothing at all.
+
+A **plain** term — no phrase, boolean or field syntax — also has its stopwords
+dropped and its alternate spellings expanded before parsing. A term carrying
+syntax is passed through untouched, so `?'"the straight path"'` still means
+exactly what it says.
 
 The indexes are committed, like the vector ones, so a checkout can search
-without a build step. Rebuild after changing text — about three seconds for
-all eight sources, 16 MB:
+without a build step. Rebuild after changing text — about eleven seconds for
+all 18 sources, 23 MB:
 
 ```bash
 cargo run --features fulltext --bin qql-index
@@ -524,6 +536,31 @@ JSON, so hadith and Hisnul Muslim records are byte-identical to before.
 
 One caveat about the supplied text: it keeps a few classical spellings, most visibly
 `السموات` rather than `السماوات`. Search that word the way the data writes it.
+
+### Spelling in English
+
+Transliteration is not consistent, in this corpus or in anyone's head, so search
+normalizes two kinds of variation.
+
+**Apostrophes are folded away.** Every engine here tokenizes on non-alphanumerics, so
+`Qur'an` used to index as `qur` + `an` and a search for `quran` matched neither half.
+The corpus is not even self-consistent — it writes `qur'an` 199 times and `qur’an` 50,
+`rak'ahs` beside `rak’ahs`, and `` `Asr `` with a backtick. All of `'` `‘` `’` `` ` ``
+`ʼ` `ʻ` `ʾ` `ʿ` now fold to nothing, collapsing them onto one token.
+
+**A short alias table** maps the spellings that differ by more than punctuation:
+
+```text
+q:"koran"          121 ayat   (the text writes Qur'an)
+q:"ibrahim"         72 ayat   (the translation writes Abraham)
+q:?"quran is easy"  54:17, 54:22, 54:40
+```
+
+It is about thirty entries — `quran`/`koran`, `muhammad`/`mohammed`, `salah`/`salat`,
+`zakah`/`zakat`, and the prophets under both their Arabic and English names. It is
+deliberately *not* general: expansion happens at query time, so the table can grow
+without rebuilding an index, and words that would collide with ordinary English
+(`lut`/`lot`, `ayyub`/`job`) are left out on purpose.
 
 Errors are still valid JSON, never a malformed string:
 

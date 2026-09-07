@@ -701,6 +701,39 @@ fn modern_spelling_finds_ayat_the_uthmani_rasm_hides() {
     }
 }
 
+/// Transliteration variants reach each other in the substring engine too.
+/// The corpus spells one name several ways and a reader knows only one.
+#[test]
+fn alternate_spellings_find_the_spelling_the_corpus_uses() {
+    let mut ctx = ctx!();
+
+    // Neither word appears anywhere in the text.
+    let koran = ctx.execute(r#"q:"koran""#).unwrap();
+    assert!(koran.len() > 50, "koran: {} hits", koran.len());
+    assert!(koran.iter().all(|r| !r.en.to_lowercase().contains("koran")));
+
+    let ibrahim = ctx.execute(r#"q:"ibrahim""#).unwrap();
+    assert!(ibrahim.len() > 50, "ibrahim: {} hits", ibrahim.len());
+    assert!(ibrahim.iter().any(|r| r.en.contains("Abraham")));
+}
+
+/// Apostrophes are folded away, so the four spellings the corpus uses for one
+/// name are one token — and a reader who types none of them still matches.
+#[test]
+fn apostrophes_do_not_split_a_word_in_two() {
+    let mut ctx = ctx!();
+
+    let plain = ctx.execute(r#"q:"quran""#).unwrap();
+    assert!(!plain.is_empty(), "quran matched nothing");
+    // The text writes it with an apostrophe; the query does not.
+    assert!(plain.iter().any(|r| r.en.contains("Qur'an")));
+    assert_eq!(
+        plain.len(),
+        ctx.execute(r#"q:"Qur'an""#).unwrap().len(),
+        "the two spellings must be the same search"
+    );
+}
+
 /// The canonical space has holes — front matter and lettered variants. Alone
 /// they error; inside a range they are skipped, so walking the whole book
 /// (which is exactly what unscoped search does) never trips.
