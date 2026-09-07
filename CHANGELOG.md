@@ -4,6 +4,8 @@ QQL's lineage, by what each version taught the language to do:
 
 | Version | Adds | Query |
 | --- | --- | --- |
+| **[3.6](#360--spelling)** | search that survives spelling | `q:?"quran is easy"` |
+| **[3.2](#320--ten-more-collections)** | ten more hadith collections | `RS:1:1` |
 | **[3.0](#300--indexed-search)** | indexed full-text search | `q:1:?"mercy"` |
 | **[2.0](#200--vector-search)** | vector similarity search | `q:1:*"worship"` |
 | **[1.1](#110--text-search)** | plain text search | `q:1:"الحمد"` |
@@ -15,6 +17,91 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 > These are recorded after the fact: the work happened in sequence but no tags
 > were cut at the time, so 3.0.0 is the first tagged release. Everything below
 > ships in it.
+
+---
+
+## 3.6.0 — Spelling
+
+Search stopped depending on the reader spelling a word the way the corpus
+does. Every fix below is one a query could not work around.
+
+### Added
+
+- **Emlaei alongside Uthmani.** Each ayah now carries `emlaei`, the simplified
+  spelling, beside the mushaf text in `ar`. The two differ in the consonantal
+  skeleton and not merely in marks — `ٱلصَّلَوٰةَ` against `الصلاة`, `ٱلْكِتَٰب` against
+  `الكتاب` — so no amount of folding bridges them, and a search typed in modern
+  orthography returned **nothing** for some of the commonest words in the
+  text. `q:"الكتاب"` now finds 162 ayat where it found none. Merged in by
+  `scripts/build-quran.py` from the committed `sources/hafs_smart_v8.json`,
+  which refuses to write unless every ayah's spelling aligns with its Uthmani
+  one. `ar` is unchanged, byte for byte.
+- **A transliteration alias table**, expanded at query time: `q:"koran"`
+  reaches `Qur'an`, `q:"ibrahim"` reaches *Abraham*. About thirty curated
+  groups, deliberately not general — collision-prone pairs (`lut`/`lot`) are
+  left out.
+- **Token weighting in the vector index** (embedder id 2). Tokens are scaled
+  by inverse document frequency, a whole word outweighs one of its own
+  trigrams three to one, and stopwords are zeroed. Previously *is* weighed
+  what *quran* weighed. The weight table ships inside the `.qv`, keyed by
+  token hash so no vocabulary is needed — about 0.3 MB per source.
+
+### Fixed
+
+- **Apostrophes no longer split a word in two.** Every tokenizer here breaks
+  on non-alphanumerics, so `Qur'an` indexed as `qur` + `an` and `?"quran"`
+  matched neither half. The corpus is not even self-consistent: it writes
+  `qur'an` 199 times and `qur’an` 50, `rak'ahs` beside `rak’ahs`, and `` `Asr ``
+  with a backtick. `fold` now drops the whole class.
+- **English is indexed folded**, like every other field. Folding only the
+  query would not have helped — the mismatch was on both sides.
+- **Full-text terms are combined with `OR`, not `AND`.** One word the corpus
+  spelled differently used to answer a whole phrase with zero results. BM25
+  ranks partial matches instead; an explicit `AND` in the term still means
+  `AND`.
+
+Together these turn `q:?"quran is easy"` from **no results at all** into
+54:17, 54:22 and 54:40 — the ayat that say it.
+
+### Changed
+
+- A *plain* term — no phrase, boolean or field syntax — has its stopwords
+  dropped and its aliases expanded before parsing. Terms carrying syntax pass
+  through untouched, so `?'"the straight path"'` still means what it says.
+- Both index sets were rebuilt: vectors 32 MB, full-text 23 MB.
+
+### Notes
+
+- Vector search remains **fuzzy lexical, not semantic**. Tiers 3 and 4 of that
+  work — static token embeddings, and a real sentence model — are recorded in
+  [docs/todo.md](docs/todo.md) rather than attempted.
+- Embedder id 1 files still parse and query exactly as before.
+- 3.3 through 3.5 were never cut; this release carries that work.
+
+---
+
+## 3.2.0 — Ten more collections
+
+### Added
+
+- **Ten hadith collections**, taking the total to sixteen: `MA` Muwatta Malik,
+  `DA` Sunan ad-Darimi, `RS` Riyad as-Salihin, `BM` Bulugh al-Maram, `AM`
+  Al-Adab Al-Mufrad, `MK` Mishkat al-Masabih, `SM` Ash-Shama'il, and the three
+  forties `NW`, `QD`, `SW`.
+- Canonical numbering maps for the Muwatta and the three forties, so `MA::1858`
+  and `NW::42` resolve like `B::6403`.
+
+### Changed
+
+- **Six collections are addressable by chapter only.** `DA`, `RS`, `BM`, `AM`,
+  `MK` and `SM` have no citation numbering QQL can source: the data carries a
+  position within the chapter and nothing more, and that position is *not*
+  what these works are cited by. `CODE::N` is refused with `QQL_UNSUPPORTED`
+  rather than answered from a number that would return the wrong hadith.
+- Musnad Ahmad is deliberately **not** carried — upstream has 8 of its musnads
+  and 1,374 of roughly 27,000 hadiths.
+- `DA` has no English translation upstream; all 2,757 records have an empty
+  `en`.
 
 ---
 
