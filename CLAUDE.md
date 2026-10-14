@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (16 collections), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, full-text search, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 120 Rust tests plus 13 Dart tests pass; 155 with `--features vector,fulltext`. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
+v1 is complete: lexer, parser, AST, error model, source registry, `Repository` cache, Quran resolver, hadith resolvers (16 collections), Hisnul Muslim resolver, user-defined JSON sources, book-wide `B::100` numbering, full-text search, `qql` CLI, C ABI (`src/ffi.rs` + `include/qql.h`), Dart binding, fuzz targets, CI. 119 Rust tests plus 13 Dart tests pass; 155 with `--features vector,fulltext`. `docs/plan.md` is the spec (41 sections, 11 phases) and remains the authority on design.
 
 The project was respecified from C to Rust. Anything that reads like C (CMake, manual frees, `qql_error_t` in core logic) is stale.
 

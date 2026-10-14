@@ -141,6 +141,10 @@ const ALIASES: &[&[&str]] = &[
 /// Used only to drop terms from a *query* and to zero them when *embedding*,
 /// never to strip the full-text index: phrases still need them in place, so
 /// `?'"the straight path"'` keeps matching.
+///
+/// Exact search rewrites nothing, so this and the query-rewriting helpers
+/// below exist only when one of the ranked engines is built.
+#[cfg(any(feature = "vector", feature = "fulltext"))]
 const STOPWORDS: &str = include_str!("stopwords.txt");
 
 /// Other spellings of `word`, including `word` itself. Empty when there are
@@ -157,6 +161,7 @@ pub fn aliases(word: &str) -> &'static [&'static str] {
 }
 
 /// Whether a word adds nothing to a query.
+#[cfg(any(feature = "vector", feature = "fulltext"))]
 pub fn is_stopword(word: &str) -> bool {
     STOPWORDS
         .lines()
@@ -169,6 +174,7 @@ pub fn is_stopword(word: &str) -> bool {
 /// through to tantivy. Dropping a stopword out of `"the straight path"` or
 /// expanding a word inside `title:x` would change what the user asked for, so
 /// anything carrying syntax is passed along untouched.
+#[cfg(any(feature = "vector", feature = "fulltext"))]
 pub fn is_plain(term: &str) -> bool {
     !term.chars().any(|c| "\"()[]{}:+-^*?~\\/".contains(c))
         && !term
@@ -181,6 +187,7 @@ pub fn is_plain(term: &str) -> bool {
 /// `"quran is easy"` becomes `"quran easy"`. A query that is *only* stopwords
 /// is left alone — the user asked for something, and an empty query would
 /// answer with everything.
+#[cfg(any(feature = "vector", feature = "fulltext"))]
 pub fn without_stopwords(term: &str) -> String {
     let kept: Vec<&str> = term
         .split_whitespace()
@@ -243,6 +250,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "vector", feature = "fulltext"))]
     fn only_plain_terms_are_rewritten() {
         assert!(is_plain("quran is easy"));
         assert!(!is_plain("\"straight path\""));

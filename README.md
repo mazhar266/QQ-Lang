@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 106 Rust tests (130 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 119 Rust tests (155 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
