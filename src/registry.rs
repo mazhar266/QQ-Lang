@@ -3,7 +3,7 @@
 
 //! Source registry — code to handler, and nothing more.
 
-use crate::sources::{HadithCollection, HisnulMuslim, Quran, Source};
+use crate::sources::{HadithCollection, HisnulMuslim, Psalms, Quran, Source};
 
 /// Every source QQL knows about.
 ///
@@ -83,6 +83,7 @@ impl Registry {
                     "shamail_muhammadiyah",
                 )),
                 Box::new(HisnulMuslim),
+                Box::new(Psalms),
             ],
         }
     }

@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim resolvers, CLI, C ABI, and a Dart binding, with 106 Rust tests (130 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim / Psalms resolvers, CLI, C ABI, and a Dart binding, with 127 Rust tests (162 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -36,7 +36,7 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | Part | Meaning |
 | --- | --- |
 | **source** | Collection code, normalized to uppercase (`Q`, `B`, `M`, `HM`, …). **Optional — omitted means the Quran.** |
-| **primary** | First-level index — Surah for Quran, chapter for Hadith and Hisnul Muslim |
+| **primary** | First-level index — Surah for Quran, psalm for Psalms, chapter for Hadith and Hisnul Muslim |
 | **selector** | Optional list of items within the primary. Omit it to select everything. |
 | `-` | Inclusive range: `1-5` → 1, 2, 3, 4, 5 |
 | `,` | Joins items, and joins groups: `1:2,3,2:5` |
@@ -348,11 +348,21 @@ python3 scripts/build-vectors.py --source Q   # just one
 | `QD` | Forty Hadith Qudsi | chapter (one: 1) | 1–40 |
 | `SW` | Forty Hadith of Shah Waliullah | chapter (one: 1) | 1–40 |
 | `HM` | Hisnul Muslim (alias `HISN`) | chapter, 1–132 | 1–267 |
+| `PS` | Psalms — the Zabur (aliases `ZABUR`, `PSALMS`) | psalm, 1–150 | 1–2461 |
 
 `qql --sources` prints the registered codes.
 
 The three forties are undivided books, so their whole text is chapter 1 and
 `NW::13` and `NW:1:13` name the same hadith.
+
+**Psalms** carries the Smith & Van Dyck Arabic (1865) as `ar`, the King James
+Version as `en`, and the World English Bible beside it as `en_web` — all three
+public domain. Search covers `ar` and `en`; `en_web` is returned but not
+searched. Verses are numbered the English way, with a psalm's title ("A Psalm
+of David") opening verse 1, so Psalm 51 has 19 verses rather than the Hebrew
+21. The Torah and the rest of the Bible are not carried: they need a third
+level — book, chapter, verse — which the grammar does not have, while Psalms is
+one book and fits `PS:psalm:verse` as it stands.
 
 A dash in the last column means the collection has **no citation numbering QQL
 can source**: the data carries a per-chapter position and nothing else, and
@@ -372,6 +382,7 @@ There are two ways to address an item, and every source supports both.
 - **Quran** — `Q:2:255` is Surah 2, ayah 255.
 - **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy), matching the upstream per-chapter files.
 - **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27.
+- **Psalms** — `PS:23:1` is Psalm 23, verse 1.
 
 **Across the whole book** — `SOURCE::n` skips the chapter and uses the
 **canonical citation numbers**: 'Abd al-Baqi's numbering for Bukhari
@@ -383,6 +394,7 @@ B::6403       the "la ilaha illallah a hundred times" hadith
 B::7563       the famous closing hadith of Sahih al-Bukhari
 Q::100        the 100th ayah of the mushaf (Surah 2, ayah 93)
 HM::75        the 75th supplication of Hisnul Muslim
+PS::2461      the last verse of the Psalms (Psalm 150, verse 6)
 B::1-10,255   ranges and lists work the same
 ```
 
@@ -408,6 +420,9 @@ Q:1;Q:2:255;Q:112;     three references
 B:1:1-10               Bukhari, chapter 1, hadith 1–10
 HM:27                  Hisnul Muslim, all of chapter 27 (morning and evening remembrance)
 HM:27:1-3              the first three supplications of that chapter
+PS:23                  Psalm 23, all six verses
+PS:51:1-4;Q:2:255      the Psalms mix with everything else
+ps:"Selah"             every verse of the Psalms that says it — 71
 B::100                 Bukhari hadith 100, traditional book-wide numbering
 Q::1-7;B::1;           flat form mixes freely with the rest
 1                      no source code — the whole of Surah 1
@@ -534,7 +549,7 @@ assert_eq!(query.references.len(), 1);
 }
 ```
 
-Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`.
+Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`, and Psalms records use `psalm`/`verse` and add `en_web`, the World English Bible beside the King James `en`.
 
 ### Two Arabic spellings
 
@@ -795,6 +810,7 @@ sources/
   quran/chapters/{1..114}.json       Arabic + English, one file per Surah
   hadith/{book}/{chapter}.json       the hadith collections, per chapter
   hisnul-muslim/husn_en.json         all 132 chapters in one file
+  psalms/{1..150}.json               Arabic + KJV + WEB, one file per psalm
   canonical/{CODE}.json              citation-number maps for B::N
   vectors/{CODE}.qv                  similarity indexes (vector feature)
   fulltext/{CODE}/                   tantivy indexes (fulltext feature)
@@ -841,9 +857,29 @@ where the two disagree about hamza spelling (`ئ` versus `ي` plus a combining h
 
 Files are read on first use and cached in the `Context` until it drops — `Q:2:255` loads roughly 50 KB, not the whole mushaf. There is no eviction policy.
 
+### The Psalms directory is generated too
+
+`sources/psalms/` is built by [scripts/build-psalms.py](scripts/build-psalms.py)
+from eBible.org's verse-per-line exports of the Van Dyck Arabic (`arb-vd`), the
+KJV (`eng-kjv2006`) and the WEB (`eng-web`), unzipped into one directory:
+
+```bash
+python3 scripts/build-psalms.py --from DIR            # rebuild
+python3 scripts/build-psalms.py --from DIR --check    # verify only, write nothing
+```
+
+It refuses to write unless the three texts pair verse for verse: 150 psalms and
+2461 verses in each, numbered without gaps, and the words that mark a verse in
+every text — *Selah* / `سلاه`, *David* / `داود` — falling in the same verses of
+the Arabic and both English texts. Aligned, they agree in all 71 and 86 verses;
+shifted by one, in 1 and 2, so a misaligned text cannot slip through. The script
+also removes the WEB export's Psalm 119 acrostic headings, which it leaves
+trailing the previous stanza; [sources/psalms/ATTRIBUTION.md](sources/psalms/ATTRIBUTION.md)
+says exactly what changed.
+
 Licensing sits next to the data: `sources/quran/TANZIL-LICENSE.txt` for the
-Quran text, and the `ATTRIBUTION.md` files in `sources/hadith/` and
-`sources/hisnul-muslim/`.
+Quran text, and the `ATTRIBUTION.md` files in `sources/hadith/`,
+`sources/hisnul-muslim/` and `sources/psalms/`.
 
 Upstream data is taken as authoritative and is never rewritten, but it is not uniform. The Hisnul Muslim file in particular carries a UTF-8 BOM, stores its chapters out of numerical order, repeats a key in two entries, and misspells one field name. Those are absorbed where they belong — the BOM in [src/repo.rs](src/repo.rs) since it is a storage concern, the rest in [src/sources/hisnul.rs](src/sources/hisnul.rs) — rather than by patching the data.
 

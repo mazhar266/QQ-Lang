@@ -27,7 +27,7 @@ use crate::ast::Reference;
 use crate::error::Error;
 use crate::record::Record;
 use crate::repo::Repository;
-use crate::sources::Source;
+use crate::sources::{total, Source};
 use serde::Deserialize;
 
 const SURAH_COUNT: u32 = 114;
@@ -49,32 +49,11 @@ const SURAH_VERSES: [u32; SURAH_COUNT as usize] = [
 ];
 
 /// Ayat in the whole mushaf. Derived, so it cannot drift from the table.
-const AYAH_COUNT: u32 = total_ayat();
-
-const fn total_ayat() -> u32 {
-    let mut total = 0;
-    let mut index = 0;
-    while index < SURAH_VERSES.len() {
-        total += SURAH_VERSES[index];
-        index += 1;
-    }
-    total
-}
+const AYAH_COUNT: u32 = total(&SURAH_VERSES);
 
 /// Split a mushaf-wide ayah number into `(surah, ayah)`.
 fn locate(global: u32) -> Option<(u32, u32)> {
-    if global == 0 {
-        return None;
-    }
-    let mut remaining = global;
-    for (index, &count) in SURAH_VERSES.iter().enumerate() {
-        if remaining <= count {
-            let surah = u32::try_from(index).ok()?.checked_add(1)?;
-            return Some((surah, remaining));
-        }
-        remaining -= count;
-    }
-    None
+    super::locate(&SURAH_VERSES, global)
 }
 
 /// `Q` — the Quran.

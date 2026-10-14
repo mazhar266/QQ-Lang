@@ -213,6 +213,20 @@ def read_hisnul():
             yield chapter['ID'], position, arabic, item.get('TRANSLATED_TEXT', '')
 
 
+def read_psalms():
+    base = os.path.join(SOURCES, 'psalms')
+    if not os.path.isdir(base):
+        return
+    # `en` is the KJV, as src/sources/psalms.rs returns it. The WEB rides
+    # along in each record but is not searched by any engine, so it is not
+    # embedded either.
+    for psalm in range(1, 151):
+        with open(f'{base}/{psalm}.json', encoding='utf-8') as f:
+            payload = json.load(f)
+        for verse in payload['verses']:
+            yield psalm, verse['verse'], verse['ar'], verse['kjv']
+
+
 CORPORA = {
     'Q': read_quran,
     'B': lambda: read_hadith('bukhari'),
@@ -232,6 +246,7 @@ CORPORA = {
     'QD': lambda: read_hadith('qudsi40'),
     'SW': lambda: read_hadith('shahwaliullah40'),
     'HM': read_hisnul,
+    'PS': read_psalms,
 }
 
 

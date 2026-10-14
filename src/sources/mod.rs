@@ -6,11 +6,13 @@
 mod hadith;
 mod hisnul;
 mod json;
+mod psalms;
 mod quran;
 
 pub use hadith::HadithCollection;
 pub use hisnul::HisnulMuslim;
 pub use json::{JsonSource, SourceSpec};
+pub use psalms::Psalms;
 pub use quran::Quran;
 
 use crate::ast::Reference;
@@ -61,4 +63,33 @@ pub trait Source: Send + Sync {
         reference: &Reference,
         out: &mut Vec<Record>,
     ) -> Result<(), Error>;
+}
+
+/// Sum a verse-count table. `const` so a source's book-wide total is derived
+/// from its table and cannot drift from it.
+const fn total(counts: &[u32]) -> u32 {
+    let mut total = 0;
+    let mut index = 0;
+    while index < counts.len() {
+        total += counts[index];
+        index += 1;
+    }
+    total
+}
+
+/// Split a book-wide item number into `(primary, item)` against a table of
+/// item counts per primary — `Q::100` into Surah 2, ayah 93.
+fn locate(counts: &[u32], global: u32) -> Option<(u32, u32)> {
+    if global == 0 {
+        return None;
+    }
+    let mut remaining = global;
+    for (index, &count) in counts.iter().enumerate() {
+        if remaining <= count {
+            let primary = u32::try_from(index).ok()?.checked_add(1)?;
+            return Some((primary, remaining));
+        }
+        remaining -= count;
+    }
+    None
 }

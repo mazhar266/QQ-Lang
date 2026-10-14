@@ -833,10 +833,130 @@ fn the_verse_count_table_matches_the_data() {
 }
 
 #[test]
+fn resolves_the_psalms() {
+    let mut ctx = ctx!();
+
+    let records = ctx.execute("PS:23:1").unwrap();
+    assert_eq!(records.len(), 1);
+
+    let verse = &records[0];
+    assert_eq!(verse.source, "PS");
+    assert_eq!(verse.collection, "Psalms (Zabur)");
+    assert_eq!(verse.extra["psalm"], 23);
+    assert_eq!(verse.extra["verse"], 1);
+    // Van Dyck's Arabic, the King James as `en`, the World English Bible
+    // alongside it. The Arabic is fully vowelled; compare its letters only.
+    let letters: String = verse
+        .ar
+        .chars()
+        .filter(|c| !('\u{064B}'..='\u{0652}').contains(c))
+        .collect();
+    assert!(letters.contains("مزمور لداود"), "{}", verse.ar);
+    assert!(verse.en.contains("my shepherd"), "{}", verse.en);
+    assert!(verse.extra["en_web"]
+        .as_str()
+        .unwrap()
+        .contains("my shepherd"));
+    assert!(verse.emlaei.is_empty());
+
+    assert_eq!(ctx.execute("PS:23").unwrap().len(), 6);
+    assert_eq!(ctx.execute("PS:119").unwrap().len(), 176);
+
+    for alias in ["ZABUR:23:1", "psalms:23:1"] {
+        assert_eq!(ctx.execute(alias).unwrap()[0].ar, verse.ar, "for {alias}");
+    }
+}
+
+/// All three texts number verses the English way: a psalm's title opens verse
+/// 1 instead of being a verse of its own, so Psalm 51 has 19 verses rather
+/// than the Hebrew 21. A text numbered the other way would fail this.
+#[test]
+fn a_psalm_title_opens_verse_one() {
+    let mut ctx = ctx!();
+
+    assert_eq!(ctx.execute("PS:51").unwrap().len(), 19);
+
+    let first = &ctx.execute("PS:51:1").unwrap()[0];
+    assert!(
+        first.en.starts_with("To the chief Musician"),
+        "{}",
+        first.en
+    );
+    assert!(first.en.contains("Have mercy upon me"), "{}", first.en);
+}
+
+/// The WEB export trails Psalm 119's acrostic headings onto the previous
+/// stanza — 119:8 ended "Don't utterly forsake me. BETH", 119:160 "SIN AND
+/// SHIN". The build strips them, and the WEB capitalizes no other word in the
+/// psalm, so any capitalized word is a heading come back.
+#[test]
+fn psalm_119_carries_no_acrostic_headings() {
+    let mut ctx = ctx!();
+
+    for record in ctx.execute("PS:119").unwrap() {
+        let web = record.extra["en_web"].as_str().unwrap();
+        let heading = web
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .find(|w| w.len() > 1 && w.chars().all(|c| c.is_ascii_uppercase()));
+        assert_eq!(heading, None, "PS:119:{} = {web}", record.extra["verse"]);
+    }
+}
+
+/// `PS::N` rests on a 150-entry verse table, the way `Q::N` does. Walk every
+/// psalm boundary against the files so the two cannot disagree.
+#[test]
+fn the_psalm_verse_table_matches_the_data() {
+    let mut ctx = ctx!();
+
+    let mut global = 0;
+    for psalm in 1..=150u64 {
+        let verses = ctx.execute(&format!("PS:{psalm}")).unwrap();
+        global += verses.len() as u64;
+
+        let flat = &ctx.execute(&format!("PS::{global}")).unwrap()[0];
+        assert_eq!(flat.extra["psalm"], psalm, "at verse {global}");
+        assert_eq!(
+            flat.extra["verse"],
+            verses.len() as u64,
+            "at verse {global}"
+        );
+        assert_eq!(flat.extra["numbering"], "book");
+        assert_eq!(flat.en, verses[verses.len() - 1].en, "at verse {global}");
+    }
+
+    assert_eq!(global, 2461);
+}
+
+#[test]
+fn the_psalms_search_in_both_languages() {
+    let mut ctx = ctx!();
+
+    let english = ctx.execute(r#"ps:23:"shepherd""#).unwrap();
+    assert_eq!(english.len(), 1);
+    assert_eq!(english[0].extra["verse"], 1);
+
+    // Typed without harakat, as anyone would.
+    let arabic = ctx.execute(r#"ps:23:"راعي""#).unwrap();
+    assert_eq!(arabic.len(), 1);
+    assert_eq!(arabic[0].extra["verse"], 1);
+
+    // Unscoped, across the whole book through the PS::N axis.
+    let selah = ctx.execute(r#"ps:"Selah""#).unwrap();
+    assert_eq!(selah.len(), 71);
+    assert!(selah.iter().all(|r| r.source == "PS"));
+}
+
+#[test]
 fn flat_references_are_bounds_checked() {
     let mut ctx = ctx!();
 
-    for query in ["B::99999", "Q::6237", "HM::268", "Q::1-4294967295"] {
+    for query in [
+        "B::99999",
+        "Q::6237",
+        "HM::268",
+        "PS::2462",
+        "Q::1-4294967295",
+    ] {
         assert_eq!(
             ctx.execute(query).unwrap_err().code(),
             "QQL_REFERENCE_NOT_FOUND",
@@ -856,7 +976,7 @@ fn missing_chapters_read_as_semantic_errors_not_storage_errors() {
         ctx.execute("B:0:1").unwrap_err().code(),
         "QQL_REFERENCE_NOT_FOUND"
     );
-    for query in ["HM:0", "HM:133", "HM:1:99"] {
+    for query in ["HM:0", "HM:133", "HM:1:99", "PS:0", "PS:151", "PS:23:7"] {
         assert_eq!(
             ctx.execute(query).unwrap_err().code(),
             "QQL_REFERENCE_NOT_FOUND",

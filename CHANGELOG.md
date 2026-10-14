@@ -4,6 +4,7 @@ QQL's lineage, by what each version taught the language to do:
 
 | Version | Adds | Query |
 | --- | --- | --- |
+| **[Unreleased](#unreleased--psalms)** | the Psalms (Zabur) | `PS:23:1` |
 | **[3.6](#360--spelling)** | search that survives spelling | `q:?"quran is easy"` |
 | **[3.2](#320--ten-more-collections)** | ten more hadith collections | `RS:1:1` |
 | **[3.0](#300--indexed-search)** | indexed full-text search | `q:1:?"mercy"` |
@@ -17,6 +18,29 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 > These are recorded after the fact: the work happened in sequence but no tags
 > were cut at the time, so 3.0.0 is the first tagged release. Everything below
 > ships in it.
+
+---
+
+## Unreleased — Psalms
+
+### Added
+
+- **`PS`, the Psalms — the Zabur** (aliases `ZABUR`, `PSALMS`). `PS:23:1` is
+  Psalm 23, verse 1; `PS::N` counts the book's 2461 verses end to end, so an
+  unscoped `PS:"..."` searches all of it. Three public-domain texts per verse:
+  the Smith & Van Dyck Arabic as `ar`, the King James Version as `en`, and the
+  World English Bible as `en_web`, which is returned but not searched.
+- `scripts/build-psalms.py` generates `sources/psalms/` from eBible.org's
+  exports and refuses to write unless the three texts pair verse for verse.
+- Vector and full-text indexes for `PS`. No other index was rebuilt.
+
+### Notes
+
+- Verses follow the English numbering, where a psalm's title opens verse 1:
+  Psalm 51 has 19 verses here and 21 in Hebrew-numbered editions.
+- The Torah and the rest of the Bible are **not** carried. They need a third
+  level of address — book, chapter, verse — that the grammar does not have;
+  Psalms is a single book and fits `PS:psalm:verse` unchanged.
 
 ---
 

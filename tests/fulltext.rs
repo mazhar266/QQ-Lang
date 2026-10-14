@@ -198,6 +198,7 @@ mod with_the_feature {
             r#"b:?"intention"~2"#,
             r#"m:?"ablution"~2"#,
             r#"hm:?"morning"~2"#,
+            r#"ps:?"shepherd"~2"#,
         ] {
             match ctx.execute(query) {
                 Ok(hits) => assert!(!hits.is_empty(), "{query} found nothing"),
