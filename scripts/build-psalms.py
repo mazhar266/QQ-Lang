@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Mazhar Ahmed
-"""Build the Psalms (Zabur) dataset QQL reads, from eBible.org's VPL exports.
+"""Build the Psalms (Zabur) dataset QQL reads — the Jewish edition.
 
-Three public-domain texts, paired verse by verse:
+`PS` carries the Psalms as the Hebrew text numbers them, from eBible.org's
+public-domain USFM exports:
 
-    arb-vd       Smith & Van Dyck Arabic (1865)        -> ar
-    eng-kjv2006  King James Version, 1769 text          -> kjv
-    eng-web      World English Bible, 2020 stable text  -> web
+    hbo          Hebrew Masoretic text — the authority for verse numbers  -> he
+    engjps       JPS 1917, the Jewish English translation                 -> en
+    arb-vd       Smith & Van Dyck Arabic (1865)                           -> ar
+    eng-kjv2006  King James Version, 1769 text                            -> kjv
+    eng-web      World English Bible                                      -> web
 
-All three follow the English versification, in which a psalm's superscription
-("A Psalm of David") is part of verse 1 rather than a verse of its own. That is
-what makes them pair at all; the checks below refuse to write if it ever stops
-being true.
+Hebrew numbering counts a psalm's title as a verse of its own: Psalm 3 has 9
+verses in Hebrew and 8 in English, and its Hebrew verse 1 is the title alone.
+Hebrew has 2527 verses where English Bibles have 2461. The four translations
+all arrive in English numbering, so this script re-cuts them:
+
+- **JPS** carries the Hebrew verse numbers inline, `(3-1) A Psalm of David…
+  (3-2) LORD, how many…`, so it is split exactly at those markers. Its markers
+  define the English -> Hebrew map that the other three follow.
+- **Van Dyck, KJV and WEB** mark a psalm's title apart from verse 1 (`\\d`).
+  Where Hebrew counts the title as its own verse(s), the title goes there and
+  the rest of English verse 1 goes to the next. Where a title spans two
+  Hebrew verses (Psalms 51, 52, 54, 60), the title fills the first and the
+  second is empty for these three; only JPS can be cut inside it.
 
 Output shape matches what `src/sources/psalms.rs` reads:
 
@@ -20,14 +32,14 @@ Output shape matches what `src/sources/psalms.rs` reads:
 
 Usage
 -----
-Fetch and unpack the three VPL zips into one directory, then point at it:
+Fetch and unpack the five USFM zips into one directory, then point at it:
 
-    mkdir /tmp/vpl && cd /tmp/vpl
-    for t in arb-vd eng-kjv2006 eng-web; do
-        curl -sSLO https://ebible.org/Scriptures/${t}_vpl.zip && unzip -o ${t}_vpl.zip
+    mkdir /tmp/usfm && cd /tmp/usfm
+    for t in hbo engjps arb-vd eng-kjv2006 eng-web; do
+        curl -sSLO https://ebible.org/Scriptures/${t}_usfm.zip && unzip -o ${t}_usfm.zip
     done
-    python3 scripts/build-psalms.py --from /tmp/vpl
-    python3 scripts/build-psalms.py --from /tmp/vpl --check   # verify, write nothing
+    python3 scripts/build-psalms.py --from /tmp/usfm
+    python3 scripts/build-psalms.py --from /tmp/usfm --check   # verify, write nothing
 """
 import argparse
 import json
@@ -38,182 +50,324 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'sources/psalms')
 
-BOOK = 'PSA'
 PSALM_COUNT = 150
-VERSE_COUNT = 2461
+HEBREW_VERSES = 2527
+ENGLISH_VERSES = 2461
 
-FILES = {
-    'ar': 'arb-vd_vpl.txt',
-    'kjv': 'eng-kjv2006_vpl.txt',
-    'web': 'eng-web_vpl.txt',
+TEXTS = {
+    'he': 'hbo',
+    'en': 'engjps',
+    'ar': 'arb-vd',
+    'kjv': 'eng-kjv2006',
+    'web': 'eng-web',
 }
 
-# The WEB export keeps Psalm 119's acrostic headings, which every other
-# section title in the package has had stripped — and it keeps them in the
-# wrong place: ALEPH opens 119:1, but BETH..TAV trail the *last* verse of the
-# previous stanza (119:8 ends "Don't utterly forsake me. BETH"). They are not
-# translation text, KJV and Van Dyck carry none, so they are removed.
-WEB_HEADINGS = [
-    'ALEPH', 'BETH', 'GIMEL', 'DALETH', 'HE', 'VAV', 'ZAYIN', 'HETH', 'TETH',
-    'YODH', 'KAPF', 'LAMEDH', 'MEM', 'NUN', 'SAMEKH', 'AYIN', 'PE', 'TZADHE',
-    'QOPH', 'RESH', 'SIN AND SHIN', 'TAV',
-]
+# Paragraph-level markers whose whole line is a heading, not verse text.
+HEADINGS = {'id', 'ide', 'h', 'toc1', 'toc2', 'toc3', 'mt1', 'mt2', 'ms1', 'ms2',
+            's1', 's2', 'qa', 'cl', 'rem', 'sp', 'r', 'mr', 'cp', 'qc'}
+# Paragraph markers that only break a line inside a verse.
+BREAKS = {'p', 'q1', 'q2', 'q3', 'b', 'm', 'pi', 'pi1', 'pi2', 'nb', 'li1', 'li2', 'pmo'}
+# Character markers whose content is kept as plain text.
+INLINE = {'nd', 'qs', 'tl', 'wh', 'wj', 'sc', 'it', 'bd', 'em', 'pn', 'k'}
 
-# Words that appear in the same verses of every text, used to prove the
-# Arabic and English are paired correctly. Measured on the 2026 exports:
-# "Selah" agrees in 71/71 verses aligned and 1/141 shifted by one; "David" in
-# 86/86 against 2/170. A 95% floor leaves room for a future edit and still
-# catches any shift.
+# The alphabetic acrostic whose stanza headings some exports mark as titles.
+ACROSTIC = 119
+
+# JPS opens five psalms with the Psalter's book headings, which every other
+# section heading in the export has had stripped. They are not text.
+JPS_BOOK = re.compile(r'^BOOK [IV]+\s+')
+JPS_BOOK_PSALMS = {1, 42, 73, 90, 107}
+
+# JPS gives Psalm 70 no Hebrew verse markers, though its Hebrew title is a
+# verse of its own. The one cut it needs: the title ends with these words.
+JPS_UNMARKED = {70: 'to make memorial.'}
+
+# Words that fall in the same Hebrew verses in every text — the proof that the
+# re-cutting is right. Selah sits at the end of a verse; David is mostly in
+# titles, so it tests the title placement directly.
+#
+# The Hebrew is matched as a whole word — `דוד` also sits inside גדוד "a
+# troop", `סלה` inside לכסלה "to folly" — allowing the one-letter prefixes
+# "to", "and", "in", "as", and the fuller spelling דויד.
 ANCHORS = [
-    ('Selah', 'سلاه'),
-    ('David', 'داود'),
+    ('Selah', r'סלה', 'سلاه'),
+    ('David', r'[ולבכ]{0,2}דוי?ד', 'داود'),
 ]
 MIN_AGREEMENT = 0.95
 
-# Harakat, superscript alef and tatweel: the anchors match without them.
-HARAKAT = set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
+HEBREW_MARKS = set(range(0x0591, 0x05C8)) - {0x05BE}
+ARABIC_MARKS = set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
 
 
-def find(directory, name):
+def find(directory, code):
+    suffix = f'PSA{code}.usfm'
     for here, _, files in os.walk(directory):
-        if name in files:
-            return os.path.join(here, name)
-    raise SystemExit(f'{name} not found under {directory}')
+        for name in files:
+            if name.endswith(suffix):
+                return os.path.join(here, name)
+    raise SystemExit(f'*{suffix} not found under {directory}')
 
 
-def read_vpl(path):
-    """`PSA 23:1 text` lines → {(psalm, verse): text}, in file order."""
-    verses = {}
+def plain(text, where):
+    """USFM character markup -> plain text. Unknown markup is an error."""
+    text = re.sub(r'\\f .*?\\f\*', '', text, flags=re.S)
+    text = re.sub(r'\\x .*?\\x\*', '', text, flags=re.S)
+    # \w word|strong="H1234"\w*  and the nested \+w form
+    text = re.sub(r'\\\+?w ([^|\\]*)(?:\|[^\\]*)?\\\+?w\*', r'\1', text)
+    # Words the KJV translators supplied: bracketed, as the plain-text export prints them.
+    text = re.sub(r'\\\+?add (.*?)\\\+?add\*', r'[\1]', text, flags=re.S)
+    for marker in INLINE:
+        text = re.sub(rf'\\\+?{marker}\*', '', text)
+        text = re.sub(rf'\\\+?{marker} ', '', text)
+    if '\\' in text:
+        raise SystemExit(f'{where}: unhandled USFM markup in {text!r}')
+    return ' '.join(text.split())
+
+
+def read_usfm(path):
+    """-> ({(psalm, verse): text}, {psalm: title})"""
+    verses, titles = {}, {}
+    chapter, current, buffer = 0, None, []
+
+    def flush():
+        if current is not None:
+            verses[current] = plain(' '.join(buffer), f'{path} {current}')
+
     with open(path, encoding='utf-8-sig') as f:
         for number, line in enumerate(f, start=1):
-            if not line.startswith(BOOK + ' '):
+            line = line.strip()
+            if not line:
                 continue
-            try:
-                _, ref, text = line.rstrip('\n').split(' ', 2)
-                psalm, verse = (int(n) for n in ref.split(':'))
-            except ValueError:
-                raise SystemExit(f'{path}:{number}: not a VPL line: {line!r}')
-            if (psalm, verse) in verses:
-                raise SystemExit(f'{path}:{number}: {psalm}:{verse} repeated')
-            verses[(psalm, verse)] = text.strip()
-    return verses
+            m = re.match(r'\\([a-z]+[0-9]*)\s*(.*)', line)
+            if not m:
+                buffer.append(line)
+                continue
+            marker, rest = m.groups()
+            if marker == 'c':
+                flush()
+                chapter, current, buffer = int(rest), None, []
+            elif marker == 'v':
+                flush()
+                n, _, text = rest.partition(' ')
+                current, buffer = (chapter, int(n)), [text]
+            elif marker == 'd' and chapter == ACROSTIC:
+                # Psalm 119 has no title; the WEB writes its 22 letter
+                # headings (ALEPH, BETH…) with the title marker.
+                continue
+            elif marker == 'd':
+                if current is not None:
+                    raise SystemExit(f'{path}:{number}: title after verse text in {chapter}')
+                # A long title may run over several \d lines (Van Dyck's 56).
+                line_text = plain(rest, f'{path}:{number}')
+                titles[chapter] = f'{titles[chapter]} {line_text}' if chapter in titles else line_text
+            elif marker in HEADINGS:
+                continue
+            elif marker in BREAKS:
+                if rest:
+                    buffer.append(rest)
+            else:
+                raise SystemExit(f'{path}:{number}: unknown marker \\{marker}')
+    flush()
+    return verses, titles
 
 
-def strip_web_headings(web):
-    """Remove the 22 acrostic headings from WEB Psalm 119. Returns how many."""
+def jps_flow(jps, hebrew):
+    """Split JPS at its Hebrew markers.
+
+    Returns (segments, targets): segments[h] is the JPS text of Hebrew verse
+    h; targets[e] is the ordered list of Hebrew verses English verse e feeds.
+    Text runs into the current Hebrew verse until a marker moves it on.
+    """
+    segments, targets = {}, {}
     removed = 0
-    for index, heading in enumerate(WEB_HEADINGS):
-        if index == 0:
-            key, pattern = (119, 1), rf'^{heading} '
-        else:
-            key, pattern = (119, 8 * index), rf' {heading}$'
-        text, n = re.subn(pattern, '', web[key])
-        web[key] = text
-        removed += n
-    return removed
+    for psalm in range(1, PSALM_COUNT + 1):
+        english = sorted(v for p, v in jps if p == psalm)
+        texts = {}
+        for v in english:
+            text = jps[(psalm, v)]
+            if v == 1 and psalm in JPS_BOOK_PSALMS:
+                text, n = JPS_BOOK.subn('', text)
+                removed += n
+            texts[v] = text
+
+        marked = any(re.search(r'\(\d+-\d+\)', t) for t in texts.values())
+        hebrew_count = sum(1 for p, _ in hebrew if p == psalm)
+        if not marked and hebrew_count != len(english):
+            cut = JPS_UNMARKED.get(psalm)
+            if cut is None:
+                raise SystemExit(f'JPS {psalm}: unmarked, but Hebrew has {hebrew_count} verses')
+            title, found, rest = texts[1].partition(cut)
+            if not found:
+                raise SystemExit(f'JPS {psalm}: cut {cut!r} not found')
+            texts[1] = f'({psalm}-1) {title}{cut} ({psalm}-2) {rest.strip()}'
+            for v in english[1:]:
+                texts[v] = f'({psalm}-{v + 1}) {texts[v]}'
+            marked = True
+
+        current = None
+        for v in english:
+            if not marked:
+                current = (psalm, v)
+                targets[(psalm, v)] = [current]
+                segments[current] = texts[v]
+                continue
+            parts = re.split(r'\((\d+)-(\d+)\)', texts[v])
+            fed = []
+            lead = parts[0].strip()
+            if lead:
+                # Text ahead of any marker opens the psalm (81:1 has no
+                # "(81-1)") or continues the verse already running (13:6).
+                current = current or (psalm, 1)
+                fed.append(current)
+                segments[current] = (segments.get(current, '') + ' ' + lead).strip()
+            for i in range(1, len(parts), 3):
+                current = (int(parts[i]), int(parts[i + 1]))
+                if current[0] != psalm:
+                    raise SystemExit(f'JPS {psalm}:{v}: marker for psalm {current[0]}')
+                fed.append(current)
+                piece = parts[i + 2].strip()
+                segments[current] = (segments.get(current, '') + ' ' + piece).strip()
+            targets[(psalm, v)] = list(dict.fromkeys(fed))
+    if removed != len(JPS_BOOK_PSALMS):
+        raise SystemExit(f'JPS: removed {removed} book headings, expected {len(JPS_BOOK_PSALMS)}')
+    return segments, targets
 
 
-def bare(text):
-    """Arabic without harakat, alef wasla read as a plain alef."""
-    return ''.join(
-        chr(0x0627) if ord(ch) == 0x0671 else ch
-        for ch in text
-        if ord(ch) not in HARAKAT
-    )
+def recut(name, verses, titles, targets, hebrew):
+    """Move an English-numbered text onto the Hebrew verses, splitting only at its title."""
+    out = {h: [] for h in hebrew}
+    empty = set()
+    for (psalm, v), fed in sorted(targets.items()):
+        text = verses[(psalm, v)]
+        title = titles.get(psalm) if v == 1 else None
+        if len(fed) == 1:
+            # Hebrew counts the title inside verse 1 here, as English does.
+            out[fed[0]].append(f'{title} {text}' if title else text)
+            continue
+        if title is None:
+            raise SystemExit(f'{name} {psalm}:{v} spans {fed} but has no title to split at')
+        out[fed[0]].append(title)
+        out[fed[-1]].append(text)
+        empty.update(fed[1:-1])
+    return {h: ' '.join(parts) for h, parts in out.items()}, empty
 
 
-def check(texts, removed):
+def strip(text, marks):
+    return ''.join(' ' if ord(c) == 0x05BE else c for c in text if ord(c) not in marks)
+
+
+def check(data, empties):
     problems = []
-    ar = texts['ar']
-
-    for name, verses in texts.items():
-        if len(verses) != VERSE_COUNT:
-            problems.append(f'{name}: {len(verses)} verses, expected {VERSE_COUNT}')
-        if set(verses) != set(ar):
-            problems.append(f'{name}: verse references differ from the Arabic')
-        empty = [k for k, t in verses.items() if not t]
-        if empty:
-            problems.append(f'{name}: {len(empty)} empty verses, first {empty[0]}')
-
-    psalms = sorted({p for p, _ in ar})
+    hebrew = data['he']
+    psalms = sorted({p for p, _ in hebrew})
     if psalms != list(range(1, PSALM_COUNT + 1)):
-        problems.append(f'psalms run {psalms[0]}..{psalms[-1]}, expected 1..{PSALM_COUNT}')
+        problems.append(f'psalms run {psalms[0]}..{psalms[-1]}')
+    if len(hebrew) != HEBREW_VERSES:
+        problems.append(f'Hebrew has {len(hebrew)} verses, expected {HEBREW_VERSES}')
     for psalm in psalms:
-        numbers = sorted(v for p, v in ar if p == psalm)
+        numbers = sorted(v for p, v in hebrew if p == psalm)
         if numbers != list(range(1, len(numbers) + 1)):
-            problems.append(f'psalm {psalm}: verses are not 1..{len(numbers)}')
+            problems.append(f'Hebrew psalm {psalm}: verses are not 1..{len(numbers)}')
 
-    if removed != len(WEB_HEADINGS):
-        problems.append(f'web: removed {removed} Psalm 119 headings, expected {len(WEB_HEADINGS)}')
-    # The WEB writes no word in capitals anywhere else in Psalm 119, so any
-    # left over is part of a heading.
-    left = [
-        k for k, t in texts['web'].items()
-        if k[0] == 119 and re.search(r'\b[A-Z]{2,}\b', t)
-    ]
-    if left:
-        problems.append(f'web: acrostic headings left at {left}')
+    for key, verses in data.items():
+        if set(verses) != set(hebrew):
+            problems.append(f'{key}: verse set differs from the Hebrew')
+        allowed = empties.get(key, set())
+        blank = sorted(h for h, t in verses.items() if not t.strip() and h not in allowed)
+        if blank:
+            problems.append(f'{key}: {len(blank)} unexpected empty verses, first {blank[:3]}')
+
+    # The WEB's Psalm 119 acrostic headings are \qa paragraphs in USFM; none
+    # may leak into a verse. It writes no other word in capitals there.
+    leaked = [h for h, t in data['web'].items() if h[0] == 119 and re.search(r'\b[A-Z]{2,}\b', t)]
+    if leaked:
+        problems.append(f'web: Psalm 119 headings in verses {leaked[:3]}')
 
     agreement = {}
-    for english in ('kjv', 'web'):
-        for en_word, ar_word in ANCHORS:
-            agree = total = 0
-            for key, arabic in ar.items():
-                in_en = bool(re.search(rf'\b{en_word}\b', texts[english].get(key, '')))
-                in_ar = ar_word in bare(arabic)
-                if in_en or in_ar:
-                    total += 1
-                    agree += in_en == in_ar
-            share = agree / max(total, 1)
-            agreement[(english, en_word)] = (agree, total)
-            if share < MIN_AGREEMENT:
-                problems.append(
-                    f'{english}/{en_word}: anchors agree in {agree}/{total} verses '
-                    f'— the texts are not paired'
-                )
-
+    for en_word, he_word, ar_word in ANCHORS:
+        in_he = {
+            h for h, t in hebrew.items()
+            if any(re.fullmatch(he_word, w) for w in strip(t, HEBREW_MARKS).split())
+        }
+        for key in ('en', 'ar', 'kjv', 'web'):
+            if key == 'ar':
+                found = {h for h, t in data[key].items() if ar_word in strip(t, ARABIC_MARKS)}
+            else:
+                found = {h for h, t in data[key].items() if re.search(rf'\b{en_word}\b', t)}
+            # A second title verse this text cannot fill says nothing either way.
+            skip = empties.get(key, set())
+            union = (in_he | found) - skip
+            agree = len((in_he & found) - skip)
+            agreement[(key, en_word)] = (agree, len(union))
+            if agree < MIN_AGREEMENT * len(union):
+                problems.append(f'{key}/{en_word}: anchors agree in {agree}/{len(union)} verses')
     return problems, agreement
 
 
-def build(texts):
+def build(data, english):
     os.makedirs(OUT, exist_ok=True)
     for psalm in range(1, PSALM_COUNT + 1):
-        verses = sorted(v for p, v in texts['ar'] if p == psalm)
+        numbers = sorted(v for p, v in data['he'] if p == psalm)
         with open(f'{OUT}/{psalm}.json', 'w', encoding='utf-8', newline='\n') as f:
             json.dump({
                 'psalm': psalm,
                 'verses': [
                     {
-                        'verse': verse,
-                        'ar': texts['ar'][(psalm, verse)],
-                        'kjv': texts['kjv'][(psalm, verse)],
-                        'web': texts['web'][(psalm, verse)],
+                        'verse': v,
+                        'he': data['he'][(psalm, v)],
+                        'ar': data['ar'][(psalm, v)],
+                        'en': data['en'][(psalm, v)],
+                        'kjv': data['kjv'][(psalm, v)],
+                        'web': data['web'][(psalm, v)],
+                        'english': english[(psalm, v)],
                     }
-                    for verse in verses
+                    for v in numbers
                 ],
             }, f, ensure_ascii=False, separators=(',', ':'))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        '--from',
-        dest='source',
-        required=True,
-        help='directory holding the unzipped arb-vd, eng-kjv2006 and eng-web VPL exports',
-    )
+    ap.add_argument('--from', dest='source', required=True,
+                    help='directory holding the unzipped hbo, engjps, arb-vd, '
+                         'eng-kjv2006 and eng-web USFM exports')
     ap.add_argument('--check', action='store_true', help='verify only')
     args = ap.parse_args()
 
-    texts = {key: read_vpl(find(args.source, name)) for key, name in FILES.items()}
-    removed = strip_web_headings(texts['web'])
-    problems, agreement = check(texts, removed)
+    raw = {key: read_usfm(find(args.source, code)) for key, code in TEXTS.items()}
+    hebrew, _ = raw['he']
+    english_count = {key: len(raw[key][0]) for key in ('en', 'ar', 'kjv', 'web')}
+    wrong = {k: n for k, n in english_count.items() if n != ENGLISH_VERSES}
+    if wrong:
+        raise SystemExit(f'English-numbered texts with the wrong verse count: {wrong}')
+    for key in ('ar', 'kjv', 'web'):
+        if set(raw[key][0]) != set(raw['en'][0]):
+            raise SystemExit(f'{key}: English verse references differ from JPS')
 
-    for key, verses in texts.items():
-        print(f'{key:<4}: {len(verses)} verses')
-    print(f'web : {removed} Psalm 119 headings removed')
-    for (english, word), (agree, total) in agreement.items():
-        print(f'pairing {english}/{word}: {agree}/{total} verses agree')
+    segments, targets = jps_flow(raw['en'][0], hebrew)
+    data = {'he': hebrew, 'en': {h: segments.get(h, '') for h in hebrew}}
+    empties = {}
+    for key in ('ar', 'kjv', 'web'):
+        verses, titles = raw[key]
+        data[key], empties[key] = recut(key, verses, titles, targets, hebrew)
+
+    english = {h: set() for h in hebrew}
+    for (psalm, v), fed in targets.items():
+        for h in fed:
+            english[h].add(v)
+    english = {h: sorted(vs) for h, vs in english.items()}
+
+    problems, agreement = check(data, empties)
+
+    split = sorted(e for e, fed in targets.items() if len(fed) > 1)
+    joined = sorted(h for h, vs in english.items() if len(vs) > 1)
+    print(f'Hebrew verses        : {len(hebrew)}')
+    print(f'English verses       : {english_count}')
+    print(f'English verses split : {len(split)} (title cut from verse 1)')
+    print(f'Hebrew verses joined : {joined}')
+    print(f'empty after re-cut   : {sorted(empties["ar"])} (ar, kjv, web)')
+    for (key, word), (agree, total) in agreement.items():
+        print(f'pairing {key:<3} / {word:<5}: {agree}/{total} verses agree with the Hebrew')
     if problems:
         print('\nFAILED:')
         for p in problems:
@@ -223,8 +377,8 @@ def main():
 
     if args.check:
         return 0
-    build(texts)
-    print(f'wrote {PSALM_COUNT} psalms covering {VERSE_COUNT} verses to sources/psalms/')
+    build(data, english)
+    print(f'wrote {PSALM_COUNT} psalms covering {len(hebrew)} verses to sources/psalms/')
     return 0
 
 

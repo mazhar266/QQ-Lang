@@ -844,19 +844,33 @@ fn resolves_the_psalms() {
     assert_eq!(verse.collection, "Psalms (Zabur)");
     assert_eq!(verse.extra["psalm"], 23);
     assert_eq!(verse.extra["verse"], 1);
-    // Van Dyck's Arabic, the King James as `en`, the World English Bible
-    // alongside it. The Arabic is fully vowelled; compare its letters only.
+    // Psalm 23's title shares its first verse, so the numbers agree with
+    // English Bibles here.
+    assert_eq!(verse.extra["english_verses"], serde_json::json!([1]));
+
+    // The Hebrew, JPS 1917 as `en`, Van Dyck's Arabic, and the KJV and WEB
+    // alongside. The Arabic is fully vowelled; compare its letters only.
+    let hebrew = verse.extra["he"].as_str().unwrap();
+    assert!(
+        hebrew
+            .chars()
+            .any(|c| ('\u{05D0}'..='\u{05EA}').contains(&c)),
+        "{hebrew}"
+    );
     let letters: String = verse
         .ar
         .chars()
         .filter(|c| !('\u{064B}'..='\u{0652}').contains(c))
         .collect();
     assert!(letters.contains("مزمور لداود"), "{}", verse.ar);
-    assert!(verse.en.contains("my shepherd"), "{}", verse.en);
-    assert!(verse.extra["en_web"]
-        .as_str()
-        .unwrap()
-        .contains("my shepherd"));
+    assert_eq!(
+        verse.en,
+        "A Psalm of David. The LORD is my shepherd; I shall not want."
+    );
+    for key in ["en_kjv", "en_web"] {
+        let text = verse.extra[key].as_str().unwrap();
+        assert!(text.contains("my shepherd"), "{key}: {text}");
+    }
     assert!(verse.emlaei.is_empty());
 
     assert_eq!(ctx.execute("PS:23").unwrap().len(), 6);
@@ -867,28 +881,84 @@ fn resolves_the_psalms() {
     }
 }
 
-/// All three texts number verses the English way: a psalm's title opens verse
-/// 1 instead of being a verse of its own, so Psalm 51 has 19 verses rather
-/// than the Hebrew 21. A text numbered the other way would fail this.
+/// Hebrew numbering counts a psalm's title as a verse of its own. Psalm 3 has
+/// 9 verses rather than English Bibles' 8, and its first is the title alone.
 #[test]
-fn a_psalm_title_opens_verse_one() {
+fn a_psalm_title_is_a_verse_of_its_own() {
     let mut ctx = ctx!();
 
-    assert_eq!(ctx.execute("PS:51").unwrap().len(), 19);
+    assert_eq!(ctx.execute("PS:3").unwrap().len(), 9);
 
-    let first = &ctx.execute("PS:51:1").unwrap()[0];
-    assert!(
-        first.en.starts_with("To the chief Musician"),
-        "{}",
-        first.en
+    let title = &ctx.execute("PS:3:1").unwrap()[0];
+    assert_eq!(
+        title.en,
+        "A Psalm of David, when he fled from Absalom his son."
     );
-    assert!(first.en.contains("Have mercy upon me"), "{}", first.en);
+    let prayer = &ctx.execute("PS:3:2").unwrap()[0];
+    assert!(prayer.en.starts_with("LORD, how many"), "{}", prayer.en);
+    // Every translation is re-cut at the same place: the title alone, then
+    // the prayer — which English Bibles both number 3:1.
+    let kjv = |r: &qql::Record| r.extra["en_kjv"].as_str().unwrap().to_string();
+    assert_eq!(
+        kjv(title),
+        "A Psalm of David, when he fled from Absalom his son."
+    );
+    assert!(kjv(prayer).starts_with("LORD, how are they increased"));
+    for record in [title, prayer] {
+        assert_eq!(record.extra["english_verses"], serde_json::json!([1]));
+    }
 }
 
-/// The WEB export trails Psalm 119's acrostic headings onto the previous
-/// stanza — 119:8 ended "Don't utterly forsake me. BETH", 119:160 "SIN AND
-/// SHIN". The build strips them, and the WEB capitalizes no other word in the
-/// psalm, so any capitalized word is a heading come back.
+/// Psalm 51's title takes two Hebrew verses. JPS 1917 divides it at the
+/// Hebrew; the other translations write it as one sentence, which fills the
+/// first verse and leaves the second empty rather than guess at a cut.
+#[test]
+fn a_two_verse_title_is_divided_only_where_the_text_allows() {
+    let mut ctx = ctx!();
+
+    assert_eq!(ctx.execute("PS:51").unwrap().len(), 21);
+
+    let second = &ctx.execute("PS:51:2").unwrap()[0];
+    assert!(
+        second.en.starts_with("When Nathan the prophet"),
+        "{}",
+        second.en
+    );
+    assert_eq!(second.ar, "");
+    assert_eq!(second.extra["en_kjv"], "");
+    assert_eq!(second.extra["en_web"], "");
+
+    let first = &ctx.execute("PS:51:1").unwrap()[0];
+    let kjv = first.extra["en_kjv"].as_str().unwrap();
+    assert!(kjv.contains("when Nathan the prophet came"), "{kjv}");
+
+    let prayer = &ctx.execute("PS:51:3").unwrap()[0];
+    assert!(
+        prayer.en.starts_with("Be gracious unto me"),
+        "{}",
+        prayer.en
+    );
+    let kjv = prayer.extra["en_kjv"].as_str().unwrap();
+    assert!(kjv.starts_with("Have mercy upon me"), "{kjv}");
+}
+
+/// Where Hebrew joins two English verses, the record says so and carries both.
+#[test]
+fn a_hebrew_verse_can_span_two_english_ones() {
+    let mut ctx = ctx!();
+
+    let verse = &ctx.execute("PS:13:6").unwrap()[0];
+    assert_eq!(verse.extra["english_verses"], serde_json::json!([5, 6]));
+    let kjv = verse.extra["en_kjv"].as_str().unwrap();
+    assert!(kjv.contains("trusted in thy mercy"), "{kjv}");
+    assert!(kjv.contains("I will sing unto the LORD"), "{kjv}");
+}
+
+/// The WEB marks Psalm 119's acrostic headings with the same marker as a
+/// psalm title, and its plain-text export trails them onto the previous
+/// stanza — 119:8 ended "Don't utterly forsake me. BETH". The build skips
+/// them, and the WEB capitalizes no other word in the psalm, so any
+/// capitalized word is a heading come back.
 #[test]
 fn psalm_119_carries_no_acrostic_headings() {
     let mut ctx = ctx!();
@@ -924,7 +994,7 @@ fn the_psalm_verse_table_matches_the_data() {
         assert_eq!(flat.en, verses[verses.len() - 1].en, "at verse {global}");
     }
 
-    assert_eq!(global, 2461);
+    assert_eq!(global, 2527);
 }
 
 #[test]
@@ -954,7 +1024,7 @@ fn flat_references_are_bounds_checked() {
         "B::99999",
         "Q::6237",
         "HM::268",
-        "PS::2462",
+        "PS::2528",
         "Q::1-4294967295",
     ] {
         assert_eq!(
@@ -976,7 +1046,9 @@ fn missing_chapters_read_as_semantic_errors_not_storage_errors() {
         ctx.execute("B:0:1").unwrap_err().code(),
         "QQL_REFERENCE_NOT_FOUND"
     );
-    for query in ["HM:0", "HM:133", "HM:1:99", "PS:0", "PS:151", "PS:23:7"] {
+    for query in [
+        "HM:0", "HM:133", "HM:1:99", "PS:0", "PS:151", "PS:23:7", "PS:3:10",
+    ] {
         assert_eq!(
             ctx.execute(query).unwrap_err().code(),
             "QQL_REFERENCE_NOT_FOUND",

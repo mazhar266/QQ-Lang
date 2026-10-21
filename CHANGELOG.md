@@ -25,22 +25,36 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ### Added
 
-- **`PS`, the Psalms — the Zabur** (aliases `ZABUR`, `PSALMS`). `PS:23:1` is
-  Psalm 23, verse 1; `PS::N` counts the book's 2461 verses end to end, so an
-  unscoped `PS:"..."` searches all of it. Three public-domain texts per verse:
-  the Smith & Van Dyck Arabic as `ar`, the King James Version as `en`, and the
-  World English Bible as `en_web`, which is returned but not searched.
+- **`PS`, the Psalms — the Zabur** (aliases `ZABUR`, `PSALMS`), in the
+  Jewish edition. `PS:23:1` is Psalm 23, verse 1; `PS::N` counts the book's
+  2527 verses end to end, so an unscoped `PS:"..."` searches all of it.
+- **Five public-domain texts per verse:**
+  - the Hebrew Masoretic text as `he`;
+  - JPS 1917 as `en`;
+  - the Smith & Van Dyck Arabic as `ar`;
+  - the King James Version and the World English Bible as `en_kjv` and
+    `en_web`.
+
+  Search covers `ar` and `en`.
 - `scripts/build-psalms.py` generates `sources/psalms/` from eBible.org's
-  exports and refuses to write unless the three texts pair verse for verse.
+  USFM exports. It refuses to write unless every Hebrew verse is filled and
+  *Selah* and *David* fall in the same verses in all five texts.
 - Vector and full-text indexes for `PS`. No other index was rebuilt.
 
 ### Notes
 
-- Verses follow the English numbering, where a psalm's title opens verse 1:
-  Psalm 51 has 19 verses here and 21 in Hebrew-numbered editions.
-- The Torah and the rest of the Bible are **not** carried. They need a third
-  level of address — book, chapter, verse — that the grammar does not have;
-  Psalms is a single book and fits `PS:psalm:verse` unchanged.
+- **Verses follow the Hebrew numbering**, where a psalm's title is a verse of
+  its own: `PS:3:1` is Psalm 3's title and its prayer begins at `PS:3:2`.
+  English Bibles number the Psalter's 2527 verses as 2461. Every record's
+  `english_verses` gives their number(s), so either citation can be followed.
+- The translations are English-numbered upstream and are re-cut to the
+  Hebrew verses: JPS at the Hebrew numbers it carries inline, the others at
+  the psalm title. Where a title spans two Hebrew verses (Psalms 51, 52, 54,
+  60), the second is empty in `ar`, `en_kjv` and `en_web`.
+- The Torah and the rest of the Bible are **not** carried yet. They need a
+  third level of address — book, chapter, verse — that the grammar does not
+  have; Psalms is a single book and fits `PS:psalm:verse` unchanged.
+  [docs/bible-plan.md](docs/bible-plan.md) plans them.
 
 ---
 

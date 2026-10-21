@@ -1,10 +1,9 @@
 # Plan — the Bible (`BI`, `OT`, `NT`), the Torah (`TO`) and the Psalms (`PS`)
 
-**Status:** proposal. Nothing here is implemented. Revised 2026-10-15.
+**Status:** proposal. Nothing here is implemented. Revised 2026-10-21.
 
-**Decided:** `TO` is the **Jewish Torah**, kept separate from the Torah inside
-the Bible. **Proposed, pending your yes:** `PS` follows the same rule and
-becomes the **Jewish Psalms**, separate from the Psalms inside the Bible (§2.2).
+**Decided:** `TO` is the **Jewish Torah** and `PS` the **Jewish Psalms**, each
+kept separate from its counterpart inside the Bible (§2).
 
 **Constraint:** extend, never break. Every query that works on `main` today
 keeps its meaning and its output, byte for byte. Every query that fails today
@@ -95,16 +94,18 @@ most psalms. The *verse* numbers differ far more than in the Torah:
   differ by one or two. Where the title shares a verse with the first line, as
   in Psalm 23, the numbers agree.
 
-**What this means for the `PS` already built.** The `add-psalms` branch holds
-a `PS` in the Christian edition: Van Dyck, KJV and WEB, English numbering. It
-is pushed but **not merged and not released**, so turning `PS` into the Jewish
-edition now breaks nobody. That built data is exactly what the Bible needs for
-`OT:PSA`, so it moves there rather than being thrown away. Merge
-`add-psalms` as it stands, though, and the switch later *would* be a breaking
-change.
+**Built (phase 1).** `PS` is the Jewish edition. The Christian-edition `PS`
+first built on `add-psalms` was never merged or released, so the switch broke
+nobody. Each verse carries:
 
-Under the Jewish edition, `PS:3:1` returns the title alone, while `PS:23:1`
-still returns "The LORD is my shepherd".
+- the Hebrew as `he`;
+- JPS 1917 as `en`;
+- Van Dyck as `ar`;
+- the KJV and WEB as `en_kjv` and `en_web`.
+
+The translations are re-cut to the Hebrew verses, and every record's
+`english_verses` gives the English number. `PS:3:1` returns the title alone,
+while `PS:23:1` still returns "The LORD is my shepherd".
 
 ### 2.3 Arabic for the Jewish editions
 
@@ -266,7 +267,7 @@ sources/bible/books.json               66 books: codes, aliases, names (en, ar),
                                        testament, verse count of every chapter
 sources/bible/{BOOK}/{chapter}.json    { verse, ar, kjv, web }
 sources/torah/{BOOK}/{chapter}.json    { verse, he, ar, en, bible_ref }
-sources/psalms/{psalm}.json            { verse, he, ar, en, bible_ref }  — replaces add-psalms' files
+sources/psalms/{psalm}.json            { verse, he, ar, en, kjv, web, english }  — built
 sources/{bible,torah,psalms}/ATTRIBUTION.md
 ```
 
@@ -315,8 +316,9 @@ Measured on the exports already downloaded:
 
 An untranslated field is `""`, never a missing key, as `DA` and `MA` already
 do. That gives `BI` 31,104 verses, `OT` 23,145 and `NT` 7,959.
-`scripts/build-bible.py` absorbs the pairing checks and the Psalm 119 heading
-fix that `add-psalms`' `build-psalms.py` does today.
+`scripts/build-bible.py` reuses `build-psalms.py`'s USFM-to-text converter
+(proven against eBible's plain-text exports: identical for Van Dyck and the
+KJV) and its anchor checks.
 
 ---
 
@@ -380,8 +382,8 @@ combinations.
 
 | # | Phase | Observable change |
 | --- | --- | --- |
-| 0 | **Prerequisites.** Push `main` (the clippy fix is committed but not pushed). Do **not** merge `add-psalms` as it stands. | none |
-| 1 | **Jewish `PS`.** Rework `add-psalms`: Hebrew, JPS 1917 and Van Dyck in Hebrew numbering, with the marker-driven split and the gates in §5. No grammar change needed. Merge. | `PS` ships |
+| 0 | **Prerequisites.** Push `main`. **Done.** | none |
+| 1 | **Jewish `PS`.** Hebrew, JPS 1917, Van Dyck, KJV and WEB in Hebrew numbering, with the marker-driven split and the gates in §5. **Done** on `add-psalms`. | `PS` ships |
 | 2 | **Grammar.** Path segments, digit-led names in the segment slot, the error-preserving pre-pass. Nothing uses paths yet. | none |
 | 3 | **Bible data.** `build-bible.py` (absorbing `add-psalms`' pairing work), `sources/bible/`, every gate in §5. | none |
 | 4 | **`BI` `OT` `NT` resolvers.** The book table, every address form, exact search, book-wide numbering. `PS` gains `bible_ref`. | the new codes |
@@ -431,12 +433,12 @@ sizes and ask about before fetching: `hbo`, `engjps`, and `arb-vd` in USFM.
 | # | Question | Status |
 | --- | --- | --- |
 | 1 | `TO`: Jewish Torah, or the first five books of `OT`? | **Decided: Jewish**, both kept |
-| 2 | `PS`: Jewish Psalms, with the Christian edition moved to `OT:PSA`? | **Proposed: yes.** Your call, before `add-psalms` merges |
+| 2 | `PS`: Jewish Psalms, with the Christian edition moved to `OT:PSA`? | **Decided: Jewish**; `add-psalms` is reworked before it merges |
 | 3 | May `BI` omit the testament (`BI:GEN:1:1`)? | Recommend **yes** — book codes are unique, and a stated testament is still checked |
 | 4 | Arabic for `TO` and `PS` | Recommend **Van Dyck re-numbered**, labelled; Saadia later if a usable text appears (§2.3) |
 | 5 | Verses that only one text has: carry them with `""` elsewhere? | Recommend **yes**, matching the existing convention |
 | 6 | Version: `Reference` gains a public field | Recommend **4.0.0** if outside crates may build `Reference`; otherwise 3.7.0 with a note |
-| 7 | Should `PS` keep the KJV and WEB too? | Recommend **no** — they live in `OT:PSA`, where their numbering is native |
+| 7 | Should `PS` keep the KJV and WEB too? | **Decided: keep** — re-cut to the Hebrew verses like the Arabic |
 | 8 | Aliases `BIBLE`, `TORAH`, `TAWRAT`? | Your call; one line each |
 
 ---

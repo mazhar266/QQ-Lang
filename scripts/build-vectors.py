@@ -217,14 +217,14 @@ def read_psalms():
     base = os.path.join(SOURCES, 'psalms')
     if not os.path.isdir(base):
         return
-    # `en` is the KJV, as src/sources/psalms.rs returns it. The WEB rides
-    # along in each record but is not searched by any engine, so it is not
-    # embedded either.
+    # Hebrew-numbered, as src/sources/psalms.rs resolves it. `en` is JPS
+    # 1917; the Hebrew, KJV and WEB ride along in each record but no engine
+    # searches them, so they are not embedded either.
     for psalm in range(1, 151):
         with open(f'{base}/{psalm}.json', encoding='utf-8') as f:
             payload = json.load(f)
         for verse in payload['verses']:
-            yield psalm, verse['verse'], verse['ar'], verse['kjv']
+            yield psalm, verse['verse'], verse['ar'], verse['en']
 
 
 CORPORA = {
