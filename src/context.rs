@@ -57,6 +57,25 @@ impl Context {
         self.registry.codes()
     }
 
+    /// How the ranked-search indexes address `code`'s records, or `None` for a
+    /// code no source answers to. `qql-index` uses it to skip the sources that
+    /// search another's index, as `OT` and `NT` search the Bible's.
+    pub fn index_keys(&self, code: &str) -> Option<crate::IndexKeys> {
+        self.registry.get(code).map(|source| source.index_keys())
+    }
+
+    /// `code`'s book-wide item count — the `CODE::N` axis — if it has one.
+    #[cfg(feature = "fulltext")]
+    pub(crate) fn total(&mut self, code: &str) -> Result<Option<u32>, Error> {
+        let source = self
+            .registry
+            .get(code)
+            .ok_or_else(|| Error::UnknownSource {
+                code: code.to_string(),
+            })?;
+        source.total(&mut self.repo)
+    }
+
     /// Register a source described by a [`SourceSpec`].
     ///
     /// Sources are searched newest-first, so registering an existing code
@@ -98,7 +117,10 @@ impl Context {
     /// References resolve in the order written and are never reordered or
     /// deduplicated against each other — `Q:2:255;Q:2:255;` yields two records.
     pub fn execute(&mut self, query: &str) -> Result<Vec<Record>, Error> {
-        let parsed: Query = crate::parser::parse(query)?;
+        let parsed: Query = match crate::parser::parse_tracked(query) {
+            Ok(parsed) => parsed,
+            Err((error, names)) => return Err(self.first_syntax_error(&names, error)),
+        };
 
         // Read the manifest on first use, matching how data files load. Doing
         // it here rather than in `new` keeps construction infallible and means
@@ -107,6 +129,8 @@ impl Context {
         if !self.manifest_loaded {
             self.load_manifest()?;
         }
+
+        self.check_paths(&parsed)?;
 
         let mut records = Vec::new();
 
@@ -158,6 +182,71 @@ impl Context {
         Ok(records)
     }
 
+    /// Reject a path on a source that takes no names, with the error the
+    /// parser gave before paths existed.
+    ///
+    /// Names are legal only right after a code, where an identifier used to
+    /// be a syntax error, so this is what keeps every such query failing
+    /// exactly as it did: `Q:A` is `QQL_EXPECTED_NUMBER` at the `A`, and
+    /// `Q:1SA` is `QQL_INVALID_CHARACTER` at the `SA`, since the parser read
+    /// the `1` as a Surah and stopped at the letters. An unknown code with a
+    /// path fails the same way, ahead of `QQL_UNKNOWN_SOURCE`, as before.
+    ///
+    /// It runs over the whole query before anything resolves, because that is
+    /// when the parser's errors came.
+    fn check_paths(&self, query: &Query) -> Result<(), Error> {
+        for reference in &query.references {
+            let (Some(code), Some(first)) = (reference.source.as_deref(), reference.path.first())
+            else {
+                continue;
+            };
+            if let Some(error) = self.name_error(code, first) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// The error a query that failed to parse has always reported.
+    ///
+    /// A name on a source that takes none was the old parser's first error,
+    /// so when one sits ahead of where parsing failed now, that is the answer:
+    /// `Q:A"x"` is still `QQL_EXPECTED_NUMBER` at the `A`, not an error at the
+    /// quote. A name on a source that takes names is ordinary syntax, and the
+    /// parse error stands.
+    fn first_syntax_error(&self, names: &[(String, crate::ast::Segment)], error: Error) -> Error {
+        names
+            .iter()
+            .find_map(|(code, first)| self.name_error(code, first))
+            .filter(|name| match (name.position(), error.position()) {
+                (Some(name), Some(parse)) => name < parse,
+                _ => false,
+            })
+            .unwrap_or(error)
+    }
+
+    /// The old parser's error for a name after `code`, if `code` takes none.
+    fn name_error(&self, code: &str, first: &crate::ast::Segment) -> Option<Error> {
+        if self
+            .registry
+            .get(code)
+            .is_some_and(|source| source.has_books())
+        {
+            return None;
+        }
+        let digits = first.name.bytes().take_while(u8::is_ascii_digit).count();
+        let number_ok = digits > 0 && first.name[..digits].parse::<u32>().is_ok();
+        Some(if number_ok {
+            Error::InvalidCharacter {
+                position: first.position + digits,
+            }
+        } else {
+            Error::ExpectedNumber {
+                position: first.position,
+            }
+        })
+    }
+
     /// Resolve a similarity search — the `*"term"` form.
     ///
     /// Without the `vector` feature this refuses the query outright. Falling
@@ -202,6 +291,90 @@ impl Context {
         out
     }
 
+    /// Where a ranked search looks: which index, which keys in it, and how a
+    /// hit comes back as a reference to the source that was asked.
+    ///
+    /// A two-level source reads its own index, keyed `(primary, number)`, and
+    /// the scope filters on those directly. A book-wide-keyed source — the
+    /// Bible, the Torah — is keyed `(0, N)`: the source turns its scope into
+    /// runs of its own `CODE::N`, and the window shifts them onto the index,
+    /// which for `OT` and `NT` is the Bible's.
+    #[cfg(any(feature = "vector", feature = "fulltext"))]
+    fn window(
+        repo: &mut Repository,
+        source: &dyn crate::Source,
+        reference: &Reference,
+    ) -> Result<Window, Error> {
+        match source.index_keys() {
+            crate::IndexKeys::Primary => Ok(Window {
+                index: source.code().to_string(),
+                primary: reference.primary,
+                ranges: reference.ranges.clone(),
+                offset: None,
+            }),
+            crate::IndexKeys::Flat { index } => {
+                let offset = source.flat_offset(repo)?;
+                let mut ranges = source.flat_scope(repo, reference)?;
+                if ranges.is_empty() {
+                    let total = source.total(repo)?.unwrap_or(0);
+                    ranges.push(Range { from: 1, to: total });
+                }
+                for range in &mut ranges {
+                    range.from += offset;
+                    range.to += offset;
+                }
+                Ok(Window {
+                    index: index.to_string(),
+                    primary: Some(0),
+                    ranges,
+                    offset: Some(offset),
+                })
+            }
+        }
+    }
+
+    /// Resolve one ranked hit through the ordinary reference path and tag it
+    /// with its score.
+    #[cfg(any(feature = "vector", feature = "fulltext"))]
+    fn ranked_hit(
+        repo: &mut Repository,
+        source: &dyn crate::Source,
+        reference: &Reference,
+        window: &Window,
+        (primary, number, score): (u32, u32, f32),
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        let (primary, number) = match window.offset {
+            // `(0, N)` in the index is `CODE::(N - offset)` in the source.
+            Some(offset) => (None, number.saturating_sub(offset)),
+            None => (Some(primary), number),
+        };
+        let mut found = Vec::new();
+        source.resolve(
+            repo,
+            &Reference {
+                source: reference.source.clone(),
+                path: Vec::new(),
+                primary,
+                ranges: vec![Range {
+                    from: number,
+                    to: number,
+                }],
+                search: None,
+            },
+            &mut found,
+        )?;
+
+        for mut record in found {
+            record.extra.insert("score".to_string(), score_value(score));
+            record
+                .extra
+                .insert("ranked".to_string(), serde_json::Value::Bool(true));
+            out.push(record);
+        }
+        Ok(())
+    }
+
     /// Resolve a similarity search against the source's vector index.
     ///
     /// The index is addressed by `(primary, number)`, so the scope filters
@@ -218,7 +391,8 @@ impl Context {
     ) -> Result<(), Error> {
         use crate::vector::{Index, DEFAULT_LIMIT};
 
-        let path = format!("vectors/{}.qv", source.code());
+        let window = Self::window(repo, source, reference)?;
+        let path = format!("vectors/{}.qv", window.index);
         let index: Arc<Index> = match repo.load_bytes_with(&path, |bytes| Index::parse(&path, bytes))
         {
             Ok(index) => index,
@@ -226,16 +400,17 @@ impl Context {
                 return Err(Error::Unsupported {
                     detail: format!(
                         "no vector index for {}; build one with scripts/build-vectors.py (expected {path})",
-                        source.code()
+                        window.index
                     ),
                 })
             }
             Err(other) => return Err(other),
         };
 
-        // Scope: `Q:1:` limits to one primary, `Q:1:3~5:` to a range in it.
-        let primary = reference.primary;
-        let ranges = reference.ranges.clone();
+        // Scope: `Q:1:` limits to one primary, `Q:1:3~5:` to a range in it;
+        // a book-wide window limits to its own run of the index.
+        let primary = window.primary;
+        let ranges = window.ranges.clone();
         let accept = move |key: &crate::vector::Key| {
             if let Some(primary) = primary {
                 if key.primary != primary {
@@ -258,28 +433,8 @@ impl Context {
         let hits = index.nearest(&query, limit as usize, accept);
 
         for (key, score) in hits {
-            let mut found = Vec::new();
-            source.resolve(
-                repo,
-                &Reference {
-                    source: reference.source.clone(),
-                    primary: Some(key.primary),
-                    ranges: vec![Range {
-                        from: key.number,
-                        to: key.number,
-                    }],
-                    search: None,
-                },
-                &mut found,
-            )?;
-
-            for mut record in found {
-                record.extra.insert("score".to_string(), score_value(score));
-                record
-                    .extra
-                    .insert("ranked".to_string(), serde_json::Value::Bool(true));
-                out.push(record);
-            }
+            let hit = (key.primary, key.number, score);
+            Self::ranked_hit(repo, source, reference, &window, hit, out)?;
         }
 
         Ok(())
@@ -316,8 +471,9 @@ impl Context {
     ) -> Result<(), Error> {
         use crate::fulltext::{Searcher, DEFAULT_LIMIT};
 
+        let window = Self::window(repo, source, reference)?;
         let data = repo.root().to_path_buf();
-        let code = source.code().to_string();
+        let code = window.index.clone();
         let searcher: Arc<Searcher> =
             match repo.cached(&format!("fulltext/{code}"), || Searcher::open(&data, &code)) {
                 Ok(searcher) => searcher,
@@ -332,36 +488,10 @@ impl Context {
             };
 
         let limit = search.limit.unwrap_or(DEFAULT_LIMIT);
-        let hits = searcher.search(
-            &search.term,
-            reference.primary,
-            &reference.ranges,
-            limit as usize,
-        )?;
+        let hits = searcher.search(&search.term, window.primary, &window.ranges, limit as usize)?;
 
-        for (primary, number, score) in hits {
-            let mut found = Vec::new();
-            source.resolve(
-                repo,
-                &Reference {
-                    source: reference.source.clone(),
-                    primary: Some(primary),
-                    ranges: vec![Range {
-                        from: number,
-                        to: number,
-                    }],
-                    search: None,
-                },
-                &mut found,
-            )?;
-
-            for mut record in found {
-                record.extra.insert("score".to_string(), score_value(score));
-                record
-                    .extra
-                    .insert("ranked".to_string(), serde_json::Value::Bool(true));
-                out.push(record);
-            }
+        for hit in hits {
+            Self::ranked_hit(repo, source, reference, &window, hit, out)?;
         }
 
         Ok(())
@@ -451,6 +581,19 @@ impl Context {
                 .to_string()
         })
     }
+}
+
+/// Where a ranked search looks; see [`Context::window`].
+#[cfg(any(feature = "vector", feature = "fulltext"))]
+struct Window {
+    /// Code of the source whose index to read.
+    index: String,
+    /// Keys must have this primary; `Some(0)` for a book-wide index.
+    primary: Option<u32>,
+    /// Keys' numbers must fall in one of these; empty is no limit.
+    ranges: Vec<Range>,
+    /// For a book-wide index, where the asking source's `::1` sits, less one.
+    offset: Option<u32>,
 }
 
 /// Round a score to three decimals so responses are stable to compare.

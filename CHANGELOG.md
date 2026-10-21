@@ -4,7 +4,7 @@ QQL's lineage, by what each version taught the language to do:
 
 | Version | Adds | Query |
 | --- | --- | --- |
-| **[Unreleased](#unreleased--psalms)** | the Psalms (Zabur) | `PS:23:1` |
+| **[Unreleased](#unreleased--the-bible-the-torah-and-the-psalms)** | the Bible, the Torah and the Psalms | `NT:JHN:3:16` |
 | **[3.6](#360--spelling)** | search that survives spelling | `q:?"quran is easy"` |
 | **[3.2](#320--ten-more-collections)** | ten more hadith collections | `RS:1:1` |
 | **[3.0](#300--indexed-search)** | indexed full-text search | `q:1:?"mercy"` |
@@ -21,10 +21,40 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ---
 
-## Unreleased — Psalms
+## Unreleased — The Bible, the Torah and the Psalms
 
 ### Added
 
+- **Book names in the grammar.** A path of names may follow a stated code —
+  the book in `OT:GEN:1:1`, the testament and book in `BI:OT:GEN:1:1` — and a
+  name may start with digits, as in `NT:1JN:4:8`. Names are legal only right
+  after a code, where an identifier was always a syntax error, so no query
+  without one changes meaning. The parser still knows no names; each source
+  says what its names mean.
+- **`BI`, `OT`, `NT` — the Bible**, the 66 books of the Protestant canon in
+  English numbering:
+  - `ar` is the Smith & Van Dyck Arabic, `en` the KJV, `en_web` the WEB;
+  - `OT:GEN:1:1`, `NT:JHN:3:16`, `BI:NT:JHN:3:16`, or `BI:JHN:3:16` without
+    the testament;
+  - `OT:GEN` is a whole book, `BI:OT` a whole testament, and `OT:GEN::32` and
+    `NT::1` count book-wide;
+  - books are named by USFM code, eBible's variant or English name.
+- **`TO` — the Torah (Tawrat), the Jewish edition.** The five books of Moses
+  in Hebrew numbering, with the Hebrew as `he`, JPS 1917 as `en`, and the Van
+  Dyck, KJV and WEB re-cut to fit. The Torah's books also answer to their
+  Hebrew names: `TO:BERESHIT:1:1`.
+- **`bible_ref`** on every `TO` and `PS` record: a query for the same passage
+  in `OT`, since the numberings differ. `TO:GEN:32:1` carries
+  `OT:GEN:31:55`, and `PS:3:2` carries `OT:PSA:3:1`.
+- **Ranked search across books.** Bible and Torah indexes are keyed by the
+  book-wide verse number (`IndexKeys::Flat`), so a testament, a book or a
+  chapter is one run of it. `OT` and `NT` search the Bible's index as windows
+  onto it, so `OT:?"covenant"` and `BI:OT:?"covenant"` rank exactly alike.
+- `scripts/build-bible.py` and `scripts/build-torah.py`, sharing a USFM
+  converter, `scripts/usfm.py`, with `build-psalms.py`. Each refuses to write
+  unless its texts pair verse for verse.
+- Vector and full-text indexes for `BI` and `TO`: 17 MB and 5.2 MB, and
+  3.3 MB and 1 MB. No other index was rebuilt.
 - **`PS`, the Psalms — the Zabur** (aliases `ZABUR`, `PSALMS`), in the
   Jewish edition. `PS:23:1` is Psalm 23, verse 1; `PS::N` counts the book's
   2527 verses end to end, so an unscoped `PS:"..."` searches all of it.
@@ -51,10 +81,31 @@ for that purpose, so a change to `include/qql.h` is a major bump.
   Hebrew verses: JPS at the Hebrew numbers it carries inline, the others at
   the psalm title. Where a title spans two Hebrew verses (Psalms 51, 52, 54,
   60), the second is empty in `ar`, `en_kjv` and `en_web`.
-- The Torah and the rest of the Bible are **not** carried yet. They need a
-  third level of address — book, chapter, verse — that the grammar does not
-  have; Psalms is a single book and fits `PS:psalm:verse` unchanged.
-  [docs/bible-plan.md](docs/bible-plan.md) plans them.
+- **The Torah and the Psalms each exist twice, on purpose.** `OT:GEN`…`OT:DEU`
+  and `OT:PSA` are the Christian edition in English numbering; `TO` and `PS`
+  are the Jewish edition in Hebrew numbering. They differ in ten places in
+  the Torah and in most titled psalms — `bible_ref` links each verse across.
+- **JPS's Ten Commandments.** JPS numbers Exodus 20 and Deuteronomy 5 by the
+  "lower" accents, joining commandments 6–9 into one verse; the Hebrew text
+  `TO` follows keeps them apart, and so does `TO`.
+
+### Compatibility
+
+- Every query that worked before returns exactly what it did.
+- Every query that failed still fails with the same error code at the same
+  byte. A name on a source without books — `Q:A`, `Q:1SA` — reports what the
+  parser reported before names existed, even when a later syntax error
+  follows. This was checked against the previous release on 292,284 generated
+  queries, with no difference.
+- `qql::parse` itself, and so `qql --parse`, now accepts a name after any code
+  (`Q:GEN` parses, and the Quran refuses it at execution). Executing the query
+  fails as before.
+- **Rust API:** `Reference` gains a public `path` field, so code that builds a
+  `Reference` with a struct literal must add `path: Vec::new()`. `Source`
+  gains only default methods (`has_books`, `index_keys`, `flat_offset`,
+  `flat_scope`), so custom sources compile unchanged.
+- The C ABI, `include/qql.h`, the Dart binding and the wire format are
+  unchanged.
 
 ---
 

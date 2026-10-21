@@ -19,7 +19,22 @@ pub struct Range {
     pub to: u32,
 }
 
-/// One `SOURCE:primary[:selector]` reference.
+/// A name between the source code and the numbers: the book in `OT:GEN:1:1`,
+/// or the testament and the book in `BI:OT:GEN:1:1`.
+///
+/// The parser knows no names. It records what was written, and the source
+/// decides what each name means — `Q:GEN` parses, and the Quran rejects it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Segment {
+    /// The name, normalized to uppercase like source codes. A name may start
+    /// with digits when letters follow at once, as in `1SA`.
+    pub name: String,
+    /// Byte offset of its first character, so a source that takes no names
+    /// can reject one exactly where the parser used to.
+    pub position: usize,
+}
+
+/// One `SOURCE[:path]:primary[:selector]` reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Reference {
     /// Source code, normalized to uppercase.
@@ -29,6 +44,16 @@ pub struct Reference {
     /// [`Context`](crate::Context) substitutes the default before resolving,
     /// so source handlers always see a concrete code.
     pub source: Option<String>,
+    /// Names between the source and the numbers — `["GEN"]` in `OT:GEN:1:1`.
+    ///
+    /// Empty for every source that has no books, which is every source but
+    /// the Bible's. Omitted from serialized output when empty, so
+    /// `qql --parse` prints what it always did for queries without one.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "segment_names"
+    )]
+    pub path: Vec<Segment>,
     /// First-level index — Surah for Quran, chapter for Hadith.
     ///
     /// `None` is the flat form `B::100`, where the primary is skipped and the
@@ -112,12 +137,17 @@ impl Reference {
         self.search.is_some()
     }
 
-    /// `"B:1"`, or `"B:"` when the primary is skipped. For error messages.
+    /// `"B:1"`, `"OT:GEN:1"`, or `"B:"` when the primary is skipped. For error
+    /// messages.
     pub fn label(&self) -> String {
-        let source = self.source.as_deref().unwrap_or_default();
+        let mut label = self.source.clone().unwrap_or_default();
+        for segment in &self.path {
+            label.push(':');
+            label.push_str(&segment.name);
+        }
         match self.primary {
-            Some(primary) => format!("{source}:{primary}"),
-            None => format!("{source}:"),
+            Some(primary) => format!("{label}:{primary}"),
+            None => format!("{label}:"),
         }
     }
 
@@ -157,6 +187,11 @@ impl Reference {
     }
 }
 
+/// Serialize a path as its names, `["OT","GEN"]` — positions are for errors.
+fn segment_names<S: serde::Serializer>(path: &[Segment], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(path.iter().map(|segment| segment.name.as_str()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +199,7 @@ mod tests {
     fn reference(ranges: &[(u32, u32)]) -> Reference {
         Reference {
             source: Some("Q".into()),
+            path: Vec::new(),
             primary: Some(2),
             search: None,
             ranges: ranges

@@ -64,6 +64,13 @@ fn main() -> ExitCode {
 
     let mut failures = 0;
     for code in wanted {
+        // `OT` and `NT` search the Bible's index; there is nothing to build.
+        if let Some(qql::IndexKeys::Flat { index }) = ctx.index_keys(&code) {
+            if index != code {
+                println!("{code:>3}: searched through {index}'s index");
+                continue;
+            }
+        }
         match qql::fulltext::build(&mut ctx, &code) {
             Ok(report) => println!(
                 "{code:>3}: {:6} documents  {}",

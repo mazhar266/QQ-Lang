@@ -47,6 +47,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import usfm  # noqa: E402  (the shared USFM reader, beside this script)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'sources/psalms')
 
@@ -61,14 +64,6 @@ TEXTS = {
     'kjv': 'eng-kjv2006',
     'web': 'eng-web',
 }
-
-# Paragraph-level markers whose whole line is a heading, not verse text.
-HEADINGS = {'id', 'ide', 'h', 'toc1', 'toc2', 'toc3', 'mt1', 'mt2', 'ms1', 'ms2',
-            's1', 's2', 'qa', 'cl', 'rem', 'sp', 'r', 'mr', 'cp', 'qc'}
-# Paragraph markers that only break a line inside a verse.
-BREAKS = {'p', 'q1', 'q2', 'q3', 'b', 'm', 'pi', 'pi1', 'pi2', 'nb', 'li1', 'li2', 'pmo'}
-# Character markers whose content is kept as plain text.
-INLINE = {'nd', 'qs', 'tl', 'wh', 'wj', 'sc', 'it', 'bd', 'em', 'pn', 'k'}
 
 # The alphabetic acrostic whose stanza headings some exports mark as titles.
 ACROSTIC = 119
@@ -99,76 +94,15 @@ HEBREW_MARKS = set(range(0x0591, 0x05C8)) - {0x05BE}
 ARABIC_MARKS = set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
 
 
-def find(directory, code):
-    suffix = f'PSA{code}.usfm'
-    for here, _, files in os.walk(directory):
-        for name in files:
-            if name.endswith(suffix):
-                return os.path.join(here, name)
-    raise SystemExit(f'*{suffix} not found under {directory}')
-
-
-def plain(text, where):
-    """USFM character markup -> plain text. Unknown markup is an error."""
-    text = re.sub(r'\\f .*?\\f\*', '', text, flags=re.S)
-    text = re.sub(r'\\x .*?\\x\*', '', text, flags=re.S)
-    # \w word|strong="H1234"\w*  and the nested \+w form
-    text = re.sub(r'\\\+?w ([^|\\]*)(?:\|[^\\]*)?\\\+?w\*', r'\1', text)
-    # Words the KJV translators supplied: bracketed, as the plain-text export prints them.
-    text = re.sub(r'\\\+?add (.*?)\\\+?add\*', r'[\1]', text, flags=re.S)
-    for marker in INLINE:
-        text = re.sub(rf'\\\+?{marker}\*', '', text)
-        text = re.sub(rf'\\\+?{marker} ', '', text)
-    if '\\' in text:
-        raise SystemExit(f'{where}: unhandled USFM markup in {text!r}')
-    return ' '.join(text.split())
-
-
-def read_usfm(path):
-    """-> ({(psalm, verse): text}, {psalm: title})"""
-    verses, titles = {}, {}
-    chapter, current, buffer = 0, None, []
-
-    def flush():
-        if current is not None:
-            verses[current] = plain(' '.join(buffer), f'{path} {current}')
-
-    with open(path, encoding='utf-8-sig') as f:
-        for number, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            m = re.match(r'\\([a-z]+[0-9]*)\s*(.*)', line)
-            if not m:
-                buffer.append(line)
-                continue
-            marker, rest = m.groups()
-            if marker == 'c':
-                flush()
-                chapter, current, buffer = int(rest), None, []
-            elif marker == 'v':
-                flush()
-                n, _, text = rest.partition(' ')
-                current, buffer = (chapter, int(n)), [text]
-            elif marker == 'd' and chapter == ACROSTIC:
-                # Psalm 119 has no title; the WEB writes its 22 letter
-                # headings (ALEPH, BETH…) with the title marker.
-                continue
-            elif marker == 'd':
-                if current is not None:
-                    raise SystemExit(f'{path}:{number}: title after verse text in {chapter}')
-                # A long title may run over several \d lines (Van Dyck's 56).
-                line_text = plain(rest, f'{path}:{number}')
-                titles[chapter] = f'{titles[chapter]} {line_text}' if chapter in titles else line_text
-            elif marker in HEADINGS:
-                continue
-            elif marker in BREAKS:
-                if rest:
-                    buffer.append(rest)
-            else:
-                raise SystemExit(f'{path}:{number}: unknown marker \\{marker}')
-    flush()
-    return verses, titles
+def read_psalter(directory, edition):
+    """-> ({(psalm, verse): text}, {psalm: title}) for one edition's Psalms."""
+    books = usfm.find_books(directory, edition)
+    if 'PSA' not in books:
+        raise SystemExit(f'{edition}: no Psalms under {directory}')
+    # Psalm 119 has no title; the WEB writes its 22 letter headings (ALEPH,
+    # BETH…) with the title marker.
+    book = usfm.read_book(books['PSA'], skip_titles_in={ACROSTIC})
+    return book.verses, book.titles
 
 
 def jps_flow(jps, hebrew):
@@ -334,7 +268,7 @@ def main():
     ap.add_argument('--check', action='store_true', help='verify only')
     args = ap.parse_args()
 
-    raw = {key: read_usfm(find(args.source, code)) for key, code in TEXTS.items()}
+    raw = {key: read_psalter(args.source, code) for key, code in TEXTS.items()}
     hebrew, _ = raw['he']
     english_count = {key: len(raw[key][0]) for key in ('en', 'ar', 'kjv', 'web')}
     wrong = {k: n for k, n in english_count.items() if n != ENGLISH_VERSES}

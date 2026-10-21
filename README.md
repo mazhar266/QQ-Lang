@@ -10,13 +10,16 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim / Psalms resolvers, CLI, C ABI, and a Dart binding, with 128 Rust tests (164 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim / Psalms / Bible / Torah resolvers, CLI, C ABI, and a Dart binding, with 154 Rust tests (194 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
 ```text
 query      := reference (';' reference)* ';'?
-reference  := (source ':')? body
+reference  := source ':' path (':' body)?   // OT:GEN, OT:GEN:1:1
+            | (source ':')? body
+path       := segment (':' segment)*        // GEN · BI:OT:GEN
+segment    := ident | integer ident         // GEN · 1SA, no space inside
 body       := text                          // Q:"..."       search
             | ':' selector                  // B::100
             | group (',' group)*
@@ -36,7 +39,8 @@ source     := [A-Za-z][A-Za-z0-9_]*
 | Part | Meaning |
 | --- | --- |
 | **source** | Collection code, normalized to uppercase (`Q`, `B`, `M`, `HM`, …). **Optional — omitted means the Quran.** |
-| **primary** | First-level index — Surah for Quran, psalm for Psalms, chapter for Hadith and Hisnul Muslim |
+| **path** | Book names, for the sources that have books: `GEN` in `OT:GEN:1:1`, `OT:GEN` in `BI:OT:GEN:1:1`. Only right after a stated code. |
+| **primary** | First-level index — Surah for Quran, psalm for Psalms, chapter for Hadith, Hisnul Muslim and the Bible's books |
 | **selector** | Optional list of items within the primary. Omit it to select everything. |
 | `-` | Inclusive range: `1-5` → 1, 2, 3, 4, 5 |
 | `,` | Joins items, and joins groups: `1:2,3,2:5` |
@@ -349,6 +353,10 @@ python3 scripts/build-vectors.py --source Q   # just one
 | `SW` | Forty Hadith of Shah Waliullah | chapter (one: 1) | 1–40 |
 | `HM` | Hisnul Muslim (alias `HISN`) | chapter, 1–132 | 1–267 |
 | `PS` | Psalms — the Zabur (aliases `ZABUR`, `PSALMS`) | psalm, 1–150 | 1–2527 |
+| `BI` | Bible — 66 books, testament optional: `BI:OT:GEN:1:1`, `BI:GEN:1:1` | chapter, after a book | 1–31104 |
+| `OT` | Old Testament — Genesis to Malachi: `OT:GEN:1:1` | chapter, after a book | 1–23145 |
+| `NT` | New Testament — Matthew to Revelation: `NT:JHN:3:16` | chapter, after a book | 1–7959 |
+| `TO` | Torah — the Tawrat, Jewish edition: `TO:GEN:1:1` | chapter, after a book | 1–5853 |
 
 `qql --sources` prints the registered codes.
 
@@ -372,10 +380,65 @@ record's `english_verses` gives the number(s) English Bibles use (`[1]` for
 both of those). Where a title shares its verse with the first line, as in
 Psalm 23, the two numberings agree.
 
-The Torah and the rest of the Bible are not carried yet. They need a third
-level — book, chapter, verse — that the grammar does not have; Psalms is one
-book and fits `PS:psalm:verse` as it stands. See
-[docs/bible-plan.md](docs/bible-plan.md).
+The Bible's own Psalms, numbered the English way, are `OT:PSA`. Every `PS`
+record's `bible_ref` is a query for the same passage there: `PS:3:2` carries
+`"bible_ref": "OT:PSA:3:1"`.
+
+### The Bible and the Torah
+
+A Bible verse needs a book as well as a chapter and verse, so these sources
+take a **path** — the book's name between the code and the numbers:
+
+```text
+OT:GEN:1:1          Genesis 1:1
+NT:JHN:3:16         John 3:16
+BI:NT:JHN:3:16      the same verse, through the whole Bible
+BI:JHN:3:16         the testament may be left out
+NT:1JN:4:8          a name may start with digits
+OT:GEN              all of Genesis
+BI:OT               the whole Old Testament
+OT:GEN::32          the 32nd verse of Genesis, counted through the book (2:1)
+NT::1               the New Testament's first verse
+TO:GEN:32:1         the Jewish Torah, Hebrew numbering
+TO:BERESHIT:1:1     Hebrew book names, in the Torah
+```
+
+A book is named by its USFM code (`GEN`, `1SA`, `JHN`), eBible's variant
+(`JOH`, `MAR`, `SOL`), or its English name without spaces (`GENESIS`,
+`1SAMUEL`, `SONGOFSONGS`). The five books of the Torah also answer to their
+Hebrew names: `BERESHIT`, `SHEMOT`, `VAYIKRA`, `BAMIDBAR`, `DEVARIM`. Names
+are case-insensitive, and the parser knows none of them — `Q:GEN` fails exactly
+as it always did.
+
+The path carries forward with its source, like the code itself:
+`OT:GEN:1:1;3:1` is Genesis 1:1 and 3:1. A name at the start of a reference
+is still a source code, though, so `OT:GEN:1:1;EXO:3:14` asks for a source
+called `EXO` — write `OT:EXO:3:14`.
+
+**Two editions, on purpose.** `BI`, `OT` and `NT` are the Christian Bible in
+English verse numbering:
+
+- `ar` is the Smith & Van Dyck Arabic;
+- `en` is the King James Version;
+- `en_web` is the World English Bible.
+
+`TO` is the **Jewish Torah**: the Hebrew Masoretic text as `he`, JPS 1917 as
+`en`, and the Van Dyck, KJV and WEB re-cut to the Hebrew verses as `ar`,
+`en_kjv` and `en_web`. The Hebrew and English numberings differ in ten places
+in the Torah, where a verse or two moves across a chapter boundary, so every
+`TO` record's `bible_ref` names the same verse in `OT`:
+
+```text
+TO:GEN:32:1    "And early in the morning Laban rose up…"    bible_ref OT:GEN:31:55
+TO:EXO:7:26    "…Let My people go, that they may serve Me." bible_ref OT:EXO:8:1
+TO:NUM:25:19   "And it came to pass after the plague,"      bible_ref OT:NUM:26:1
+```
+
+The Psalms work the same way: `PS` is the Jewish edition, `OT:PSA` the
+Christian one. Search covers `ar` and `en` in every edition; the Hebrew and
+the second English texts are returned, not searched. Ranked search reads one
+index for the whole Bible, which `OT` and `NT` see as windows, so
+`OT:?"covenant"` and `BI:OT:?"covenant"` rank exactly alike.
 
 A dash in the last column means the collection has **no citation numbering QQL
 can source**: the data carries a per-chapter position and nothing else, and
@@ -396,6 +459,7 @@ There are two ways to address an item, and every source supports both.
 - **Hadith** — `B:1:1` is the first hadith of chapter 1 (Kitab Bad' al-Wahy), matching the upstream per-chapter files.
 - **Hisnul Muslim** — `HM:27:1` is the first supplication of chapter 27.
 - **Psalms** — `PS:23:1` is Psalm 23, verse 1.
+- **The Bible and the Torah** — `NT:JHN:3:16` is John 3:16; the book comes first.
 
 **Across the whole book** — `SOURCE::n` skips the chapter and uses the
 **canonical citation numbers**: 'Abd al-Baqi's numbering for Bukhari
@@ -408,6 +472,8 @@ B::7563       the famous closing hadith of Sahih al-Bukhari
 Q::100        the 100th ayah of the mushaf (Surah 2, ayah 93)
 HM::75        the 75th supplication of Hisnul Muslim
 PS::2527      the last verse of the Psalms (Psalm 150, verse 6)
+BI::31104     the last verse of the Bible (Revelation 22:21)
+OT:GEN::32    the 32nd verse of Genesis (2:1) — `::` counts through a book too
 B::1-10,255   ranges and lists work the same
 ```
 
@@ -437,6 +503,11 @@ PS:23                  Psalm 23, all six verses
 PS:3:1                 Psalm 3's title, a verse of its own in Hebrew numbering
 PS:51:3-6;Q:2:255      the Psalms mix with everything else
 ps:"Selah"             every verse of the Psalms that says it — 71
+NT:JHN:3:16            John 3:16
+OT:GEN:1:1-5;Q:1       the Bible mixes with everything else
+NT:JHN:3:"born again"  search one chapter of John
+BI:OT:?"covenant"~5    ranked search over the Old Testament
+TO:GEN:32:1            the Jewish Torah — OT:GEN:31:55 in English numbering
 B::100                 Bukhari hadith 100, traditional book-wide numbering
 Q::1-7;B::1;           flat form mixes freely with the rest
 1                      no source code — the whole of Surah 1
@@ -563,7 +634,7 @@ assert_eq!(query.references.len(), 1);
 }
 ```
 
-Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`, and Psalms records use `psalm`/`verse` in Hebrew numbering and add `english_verses`, `he`, `en_kjv` and `en_web` beside the JPS 1917 `en`.
+Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`, Psalms records use `psalm`/`verse` in Hebrew numbering and add `english_verses`, `bible_ref`, `he`, `en_kjv` and `en_web` beside the JPS 1917 `en`. Bible records carry `testament`, `book` (the USFM code), `book_name_en`, `book_name_ar`, `chapter`, `verse` and `en_web`; Torah records drop `testament` and add `book_name_he`, `he`, `en_kjv` and `bible_ref`.
 
 ### Two Arabic spellings
 
@@ -825,6 +896,10 @@ sources/
   hadith/{book}/{chapter}.json       the hadith collections, per chapter
   hisnul-muslim/husn_en.json         all 132 chapters in one file
   psalms/{1..150}.json               Hebrew + JPS + Arabic + KJV + WEB, per psalm
+  bible/books.json                   the 66 books: Arabic names, verses per chapter
+  bible/{BOOK}/{chapter}.json        Arabic + KJV + WEB, English numbering
+  torah/books.json                   the five books, in Hebrew numbering
+  torah/{BOOK}/{chapter}.json        Hebrew + JPS + Arabic + KJV + WEB
   canonical/{CODE}.json              citation-number maps for B::N
   vectors/{CODE}.qv                  similarity indexes (vector feature)
   fulltext/{CODE}/                   tantivy indexes (fulltext feature)
@@ -898,9 +973,41 @@ same verses in all five texts: they agree in all 71 and all 86–88 verses.
 [sources/psalms/ATTRIBUTION.md](sources/psalms/ATTRIBUTION.md) lists exactly
 what the build changes.
 
+### So are the Bible and the Torah
+
+```bash
+python3 scripts/build-bible.py --from DIR    # sources/bible/  (arb-vd, eng-kjv2006, eng-web)
+python3 scripts/build-torah.py --from DIR    # sources/torah/  (hbo, engjps, arb-vd, eng-kjv2006, eng-web)
+```
+
+All three builds read eBible.org's USFM through one shared converter,
+[scripts/usfm.py](scripts/usfm.py). Measured against eBible's own plain-text
+export, it reproduces the Van Dyck and the KJV word for word, all 31,104 and
+31,102 verses.
+
+- **`build-bible.py`** refuses to write unless the three texts differ in
+  exactly the known places:
+  - Van Dyck numbers two closing greetings as verses of their own (1 Timothy
+    6:22, 3 John 1:15);
+  - the WEB omits four verses and places Romans' doxology after 14:23.
+
+  *Moses*, *David*, *Jesus* and *Abraham* must also fall in the same verses
+  across the Arabic and both English texts.
+- **`build-torah.py`** re-cuts the translations to the Hebrew verses, as the
+  Psalms build does. JPS is divided at its inline Hebrew numbers, except in
+  the Ten Commandments, where JPS follows a different accent tradition from
+  the Hebrew text. The other three are divided at whole verses, with one
+  checked cut inside Numbers 26:1. *Moses*, *Aaron*, *Pharaoh* and *Jacob*
+  must fall in the same Hebrew verses in all five texts.
+
+[sources/bible/ATTRIBUTION.md](sources/bible/ATTRIBUTION.md) and
+[sources/torah/ATTRIBUTION.md](sources/torah/ATTRIBUTION.md) list exactly what
+each build changes.
+
 Licensing sits next to the data: `sources/quran/TANZIL-LICENSE.txt` for the
 Quran text, and the `ATTRIBUTION.md` files in `sources/hadith/`,
-`sources/hisnul-muslim/` and `sources/psalms/`.
+`sources/hisnul-muslim/`, `sources/psalms/`, `sources/bible/` and
+`sources/torah/`.
 
 Upstream data is taken as authoritative and is never rewritten, but it is not uniform. The Hisnul Muslim file in particular carries a UTF-8 BOM, stores its chapters out of numerical order, repeats a key in two entries, and misspells one field name. Those are absorbed where they belong — the BOM in [src/repo.rs](src/repo.rs) since it is a storage concern, the rest in [src/sources/hisnul.rs](src/sources/hisnul.rs) — rather than by patching the data.
 

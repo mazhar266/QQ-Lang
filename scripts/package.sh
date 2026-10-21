@@ -38,6 +38,7 @@ cp sources/quran/TANZIL-LICENSE.txt "$out/sources/quran/"
 cp -r sources/hadith "$out/sources/"
 cp -r sources/hisnul-muslim "$out/sources/"
 cp -r sources/psalms "$out/sources/"
+cp -r sources/bible sources/torah "$out/sources/"
 # Canonical citation-number maps: what B::6403 resolves through.
 cp -r sources/canonical "$out/sources/"
 cp -r sources/vectors "$out/sources/"
@@ -58,5 +59,8 @@ cp LICENSE.md README.md "$out/"
     "$bin" --compact 'q:1:*"worship"'  | grep -q '"ranked":true'
     "$bin" --compact 'hm:1:1'          | grep -q '"ok":true'
     "$bin" --compact 'ps::1'           | grep -q '"psalm":1,'
+    "$bin" --compact 'nt:jhn:3:16'     | grep -q '"book":"JHN"'
+    "$bin" --compact 'to:gen:32:1'     | grep -q '"bible_ref":"OT:GEN:31:55"'
+    "$bin" --compact 'ot:?"covenant"~1' | grep -q '"ranked":true'
 )
 echo "bundle ok: $out ($(du -sh "$out" | cut -f1))"

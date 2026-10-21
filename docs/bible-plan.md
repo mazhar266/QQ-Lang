@@ -1,6 +1,9 @@
 # Plan — the Bible (`BI`, `OT`, `NT`), the Torah (`TO`) and the Psalms (`PS`)
 
-**Status:** proposal. Nothing here is implemented. Revised 2026-10-21.
+**Status:** phases 0–7 implemented on `feat/bible-adoption` (2026-10-21).
+Phase 8 is optional and not started. Decisions 6 and 8 are still open (§10).
+Where the build departed from this plan, the next section says so; the rest
+of the document is the design as planned.
 
 **Decided:** `TO` is the **Jewish Torah** and `PS` the **Jewish Psalms**, each
 kept separate from its counterpart inside the Bible (§2).
@@ -8,6 +11,41 @@ kept separate from its counterpart inside the Bible (§2).
 **Constraint:** extend, never break. Every query that works on `main` today
 keeps its meaning and its output, byte for byte. Every query that fails today
 still fails, with the same error code at the same position.
+
+---
+
+## As built — where the implementation departs from the plan
+
+- **Error preservation lives in `Context`, not the parser.** `qql::parse`
+  alone now accepts a name after any code — `Q:GEN` parses — since it cannot
+  know which sources take names. Executing such a query fails exactly as
+  before: `Context` refuses the name with the old parser's error. When a later
+  syntax error follows the name, `parse_tracked` reports the names it saw and
+  the earlier one wins, as it did in the old parser. Checked against the
+  pre-path parser on 292,284 generated queries: no difference in code or
+  byte position. Only `qql --parse` shows the change.
+- **`IndexKeys::Flat` carries no offset.** Where `NT` starts in the Bible-wide
+  numbering is read from the data (`Source::flat_offset`), not hard-coded.
+- **`TO` also carries the KJV and WEB** (`en_kjv`, `en_web`), re-cut like the
+  Arabic, to match `PS` after decision 7.
+- **The Ten Commandments** (Exodus 20, Deuteronomy 5): JPS numbers them by the
+  lower accents, joining commandments 6–9 into one Hebrew verse. eBible's
+  Hebrew keeps them apart, as English Bibles do, so `build-torah.py` ignores
+  JPS's markers in those two chapters and keeps the English numbers.
+- **Numbers 26 keeps its verse count** in both numberings; only half its
+  first verse moves to 25:19. The ten places therefore touch 19 chapters, not
+  20.
+- **The field is `bible_ref` everywhere** (the plan also called it
+  `ot_ref`). It names the first English verse a Hebrew verse belongs to, or a
+  range such as `OT:PSA:13:5-6`.
+- **One shared USFM reader**, `scripts/usfm.py`, serves the Psalms, Bible
+  and Torah builds. It reproduces eBible's plain text for Van Dyck and the
+  KJV on all 66 books. The WEB differs only where its plain-text export leaks
+  speaker labels and Psalm 119 headings into verses, or carries older wording.
+- **Measured sizes:**
+  - Bible data: 19 MB, indexes 17 MB + 5.2 MB.
+  - Torah data: 6 MB, indexes 3.2 MB + 1.2 MB.
+  - Psalms data: 2 MB.
 
 ---
 
@@ -384,12 +422,12 @@ combinations.
 | --- | --- | --- |
 | 0 | **Prerequisites.** Push `main`. **Done.** | none |
 | 1 | **Jewish `PS`.** Hebrew, JPS 1917, Van Dyck, KJV and WEB in Hebrew numbering, with the marker-driven split and the gates in §5. **Done** on `add-psalms`. | `PS` ships |
-| 2 | **Grammar.** Path segments, digit-led names in the segment slot, the error-preserving pre-pass. Nothing uses paths yet. | none |
-| 3 | **Bible data.** `build-bible.py` (absorbing `add-psalms`' pairing work), `sources/bible/`, every gate in §5. | none |
-| 4 | **`BI` `OT` `NT` resolvers.** The book table, every address form, exact search, book-wide numbering. `PS` gains `bible_ref`. | the new codes |
-| 5 | **Ranked Bible search.** Flat-keyed index, windows, the `BI` index set. | `?` and `*` on the Bible |
-| 6 | **Jewish `TO`.** `build-torah.py`, the resolver, its index, `bible_ref`. | `TO` |
-| 7 | **Docs and release.** README, CHANGELOG, CLAUDE.md, Dart README, `package.sh` bundle and smoke lines, the version. | none |
+| 2 | **Grammar.** Path segments, digit-led names in the segment slot, the error-preserving pre-pass. Nothing uses paths yet. **Done.** | none |
+| 3 | **Bible data.** `build-bible.py` (absorbing `add-psalms`' pairing work), `sources/bible/`, every gate in §5. **Done.** | none |
+| 4 | **`BI` `OT` `NT` resolvers.** The book table, every address form, exact search, book-wide numbering. `PS` gains `bible_ref`. **Done.** | the new codes |
+| 5 | **Ranked Bible search.** Flat-keyed index, windows, the `BI` index set. **Done.** | `?` and `*` on the Bible |
+| 6 | **Jewish `TO`.** `build-torah.py`, the resolver, its index, `bible_ref`. **Done.** | `TO` |
+| 7 | **Docs and release.** README, CHANGELOG, CLAUDE.md, Dart README, `package.sh` bundle and smoke lines, the version. **Done**, bar the version (decision 6). | none |
 | 8 | **Optional.** Comma groups that switch book (`OT:GEN:1:1,EXO:3:14`); an unknown-source hint ("EXO is a book — write OT:EXO:3:14"); searchable Hebrew; an Injil view (the four Gospels); aliases `BIBLE`, `TORAH`, `TAWRAT`. | as chosen |
 
 Building them needs new downloads from eBible.org, which I will list with
@@ -434,12 +472,12 @@ sizes and ask about before fetching: `hbo`, `engjps`, and `arb-vd` in USFM.
 | --- | --- | --- |
 | 1 | `TO`: Jewish Torah, or the first five books of `OT`? | **Decided: Jewish**, both kept |
 | 2 | `PS`: Jewish Psalms, with the Christian edition moved to `OT:PSA`? | **Decided: Jewish**; `add-psalms` is reworked before it merges |
-| 3 | May `BI` omit the testament (`BI:GEN:1:1`)? | Recommend **yes** — book codes are unique, and a stated testament is still checked |
-| 4 | Arabic for `TO` and `PS` | Recommend **Van Dyck re-numbered**, labelled; Saadia later if a usable text appears (§2.3) |
-| 5 | Verses that only one text has: carry them with `""` elsewhere? | Recommend **yes**, matching the existing convention |
-| 6 | Version: `Reference` gains a public field | Recommend **4.0.0** if outside crates may build `Reference`; otherwise 3.7.0 with a note |
+| 3 | May `BI` omit the testament (`BI:GEN:1:1`)? | **Built: yes** — book codes are unique, and a stated testament is still checked |
+| 4 | Arabic for `TO` and `PS` | **Built: Van Dyck re-numbered**, labelled; Saadia later if a usable text appears (§2.3) |
+| 5 | Verses that only one text has: carry them with `""` elsewhere? | **Built: yes**, matching the existing convention |
+| 6 | Version: `Reference` gains a public field | **Open.** Recommend **4.0.0** if outside crates may build `Reference`; otherwise 3.7.0 with a note |
 | 7 | Should `PS` keep the KJV and WEB too? | **Decided: keep** — re-cut to the Hebrew verses like the Arabic |
-| 8 | Aliases `BIBLE`, `TORAH`, `TAWRAT`? | Your call; one line each |
+| 8 | Aliases `BIBLE`, `TORAH`, `TAWRAT`? | **Open** — not added; your call, one line each |
 
 ---
 

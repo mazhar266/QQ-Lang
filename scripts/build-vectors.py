@@ -227,6 +227,32 @@ def read_psalms():
             yield psalm, verse['verse'], verse['ar'], verse['en']
 
 
+def read_books(directory, english):
+    """A multi-book scripture, keyed book-wide: `(0, N)` is `CODE::N`.
+
+    A scope such as the Torah or a testament spans several books, so it cannot
+    be one primary — but it is always one run of the book-wide number, which is
+    what src/sources/*.rs filters on. `OT` and `NT` search the Bible's index as
+    windows onto it.
+    """
+    base = os.path.join(SOURCES, directory)
+    catalog = os.path.join(base, 'books.json')
+    if not os.path.exists(catalog):
+        return
+    with open(catalog, encoding='utf-8') as f:
+        books = json.load(f)['books']
+    number = 0
+    for book in books:
+        for chapter, count in enumerate(book['chapters'], start=1):
+            with open(f"{base}/{book['code']}/{chapter}.json", encoding='utf-8') as f:
+                verses = json.load(f)['verses']
+            if len(verses) != count:
+                raise SystemExit(f"{book['code']} {chapter}: {len(verses)} verses, catalog says {count}")
+            for verse in verses:
+                number += 1
+                yield 0, number, verse['ar'], verse[english]
+
+
 CORPORA = {
     'Q': read_quran,
     'B': lambda: read_hadith('bukhari'),
@@ -247,6 +273,10 @@ CORPORA = {
     'SW': lambda: read_hadith('shahwaliullah40'),
     'HM': read_hisnul,
     'PS': read_psalms,
+    # `en` is the KJV, as src/sources/bible.rs returns it.
+    'BI': lambda: read_books('bible', 'kjv'),
+    # The Jewish Torah, Hebrew-numbered; `en` is JPS 1917.
+    'TO': lambda: read_books('torah', 'en'),
 }
 
 

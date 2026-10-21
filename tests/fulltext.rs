@@ -199,6 +199,9 @@ mod with_the_feature {
             r#"m:?"ablution"~2"#,
             r#"hm:?"morning"~2"#,
             r#"ps:?"shepherd"~2"#,
+            r#"bi:?"shepherd"~2"#,
+            r#"nt:?"love one another"~2"#,
+            r#"to:?"burning bush"~2"#,
         ] {
             match ctx.execute(query) {
                 Ok(hits) => assert!(!hits.is_empty(), "{query} found nothing"),
@@ -280,5 +283,74 @@ mod with_the_feature {
         };
         assert!(!hits.is_empty(), "koran did not reach Qur'an");
         assert!(hits.iter().any(|r| r.en.to_lowercase().contains("qur")));
+    }
+
+    /// `(book, chapter, verse, score)` of each ranked hit.
+    fn ranked(ctx: &mut Context, query: &str) -> Vec<(String, u64, u64, String)> {
+        ctx.execute(query)
+            .unwrap_or_else(|e| panic!("{query}: {e}"))
+            .iter()
+            .map(|r| {
+                (
+                    r.extra["book"].as_str().unwrap().to_string(),
+                    r.extra["chapter"].as_u64().unwrap(),
+                    r.extra["verse"].as_u64().unwrap(),
+                    r.extra["score"].to_string(),
+                )
+            })
+            .collect()
+    }
+
+    fn bible_ready() -> bool {
+        let data = std::path::Path::new(DATA);
+        data.join("fulltext/BI/meta.json").exists() && data.join("fulltext/TO/meta.json").exists()
+    }
+
+    /// The testaments search the Bible's own index as windows onto it, so the
+    /// same scope ranks the same way whichever code names it.
+    #[test]
+    fn the_testaments_rank_exactly_as_the_bible_does() {
+        let mut ctx = ctx!();
+        if !bible_ready() {
+            return;
+        }
+
+        let through_ot = ranked(&mut ctx, r#"OT:?"covenant"~8"#);
+        let through_bi = ranked(&mut ctx, r#"BI:OT:?"covenant"~8"#);
+        assert_eq!(through_ot.len(), 8);
+        assert_eq!(through_ot, through_bi);
+
+        // A window keeps to itself.
+        for hit in ctx.execute(r#"NT:?"covenant"~20"#).unwrap() {
+            assert_eq!(hit.extra["testament"], "NT");
+        }
+        for (book, chapter, _, _) in ranked(&mut ctx, r#"NT:JHN:3:?"loved the world"~5"#) {
+            assert_eq!((book.as_str(), chapter), ("JHN", 3));
+        }
+        // A book scope crosses chapters, as one run of the book-wide number.
+        for (book, _, _, _) in ranked(&mut ctx, r#"OT:EXO:?"pharaoh"~10"#) {
+            assert_eq!(book, "EXO");
+        }
+    }
+
+    /// Hits come back in the asking source's own numbering.
+    #[test]
+    fn bible_hits_are_ordinary_records() {
+        let mut ctx = ctx!();
+        if !bible_ready() {
+            return;
+        }
+
+        let hit = &ctx.execute(r#"NT:?"good shepherd"~1"#).unwrap()[0];
+        let direct = &ctx.execute("NT:JHN:10:11").unwrap()[0];
+        assert_eq!(hit.ar, direct.ar);
+        assert_eq!(hit.source, "NT");
+        assert_eq!(hit.extra["ranked"], true);
+
+        // The Torah has an index of its own, in Hebrew numbering.
+        let hit = &ctx.execute(r#"TO:?"burning bush"~1"#).unwrap()[0];
+        assert_eq!(hit.extra["book"], "EXO");
+        assert_eq!(hit.extra["verse"], 2);
+        assert_eq!(hit.extra["bible_ref"], "OT:EXO:3:2");
     }
 }

@@ -1,0 +1,100 @@
+{
+  "index_settings": {
+    "docstore_compression": "lz4",
+    "docstore_blocksize": 16384
+  },
+  "segments": [
+    {
+      "segment_id": "3de90104-95ee-4baa-a692-03a5b1779c4d",
+      "max_doc": 6016,
+      "deletes": null
+    },
+    {
+      "segment_id": "d153189c-4dfe-4f6f-80d3-c62f2727c27a",
+      "max_doc": 5931,
+      "deletes": null
+    },
+    {
+      "segment_id": "588df65a-f6eb-43ad-8af1-c12a39eb19d6",
+      "max_doc": 5855,
+      "deletes": null
+    },
+    {
+      "segment_id": "1ea5ee47-1102-42f6-a034-75b3d0c8a078",
+      "max_doc": 4959,
+      "deletes": null
+    },
+    {
+      "segment_id": "692a7e0a-78f7-43d5-a7ce-53494dfdd240",
+      "max_doc": 4476,
+      "deletes": null
+    },
+    {
+      "segment_id": "5739d120-72b7-4399-b4a5-2ebc787bf98e",
+      "max_doc": 3867,
+      "deletes": null
+    }
+  ],
+  "schema": [
+    {
+      "name": "primary",
+      "type": "u64",
+      "options": {
+        "indexed": true,
+        "fieldnorms": true,
+        "fast": true,
+        "stored": true
+      }
+    },
+    {
+      "name": "number",
+      "type": "u64",
+      "options": {
+        "indexed": true,
+        "fieldnorms": true,
+        "fast": true,
+        "stored": true
+      }
+    },
+    {
+      "name": "ar",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": false,
+        "fast": false
+      }
+    },
+    {
+      "name": "emlaei",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": false,
+        "fast": false
+      }
+    },
+    {
+      "name": "en",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "en_stem"
+        },
+        "stored": false,
+        "fast": false
+      }
+    }
+  ],
+  "opstamp": 31110
+}

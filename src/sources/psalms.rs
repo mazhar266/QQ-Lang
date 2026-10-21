@@ -158,6 +158,10 @@ impl Psalms {
                 ("psalm".to_string(), number.into()),
                 ("verse".to_string(), verse.into()),
                 ("english_verses".to_string(), Value::Array(english)),
+                (
+                    "bible_ref".to_string(),
+                    bible_ref("PSA", number, &found.english).into(),
+                ),
                 ("he".to_string(), found.he.clone().into()),
                 ("en_kjv".to_string(), found.kjv.clone().into()),
                 ("en_web".to_string(), found.web.clone().into()),
@@ -195,9 +199,29 @@ impl Psalms {
     }
 }
 
+/// The same passage in the Bible, as a query: `OT:PSA:3:1`, or
+/// `OT:PSA:13:5-6` where Hebrew joins two English verses. Shared with the
+/// Torah, whose verses move between chapters too.
+pub(crate) fn bible_ref(book: &str, chapter: u32, english: &[u32]) -> String {
+    match english {
+        [] => format!("OT:{book}:{chapter}"),
+        [only] => format!("OT:{book}:{chapter}:{only}"),
+        [first, .., last] => format!("OT:{book}:{chapter}:{first}-{last}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bible_refs_are_queries() {
+        assert_eq!(bible_ref("PSA", 3, &[1]), "OT:PSA:3:1");
+        assert_eq!(bible_ref("PSA", 13, &[5, 6]), "OT:PSA:13:5-6");
+        for query in [bible_ref("PSA", 3, &[1]), bible_ref("PSA", 13, &[5, 6])] {
+            assert!(crate::parse(&query).is_ok(), "{query}");
+        }
+    }
 
     #[test]
     fn the_table_covers_the_whole_book() {

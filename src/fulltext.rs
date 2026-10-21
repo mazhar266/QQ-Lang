@@ -60,6 +60,7 @@
 
 use crate::context::Context;
 use crate::error::Error;
+use crate::sources::IndexKeys;
 use std::path::{Path, PathBuf};
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
@@ -163,13 +164,35 @@ fn wrap(e: impl std::fmt::Display, path: &Path) -> Error {
     }
 }
 
+/// How many records a book-wide build asks for at a time.
+const CHUNK: u32 = 2000;
+
 /// Build the index for one source, replacing whatever was there.
 ///
 /// Records are enumerated through the ordinary query path — `CODE:1`, `CODE:2`
 /// and so on — so this needs no privileged access and cannot disagree with the
 /// resolver about numbering. Within a primary, the *n*-th record is item *n*,
 /// which is exactly what `CODE:primary:n` addresses.
+///
+/// A source keyed book-wide ([`IndexKeys::Flat`]) is enumerated as `CODE::1-2000`,
+/// `CODE::2001-4000`…, every document keyed `(0, N)`. One that searches
+/// another's index — `OT` and `NT` read the Bible's — has nothing to build.
 pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
+    let flat = match ctx.index_keys(code) {
+        None => {
+            return Err(Error::UnknownSource {
+                code: code.to_string(),
+            })
+        }
+        Some(IndexKeys::Flat { index }) if index != code => {
+            return Err(Error::Unsupported {
+                detail: format!("{code} is searched through {index}'s index; build {index}"),
+            })
+        }
+        Some(IndexKeys::Flat { .. }) => true,
+        Some(IndexKeys::Primary) => false,
+    };
+
     let path = index_path(ctx.data_dir(), code);
     let (schema, fields) = schema();
 
@@ -184,7 +207,29 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
     let mut documents = 0usize;
     let mut misses = 0u32;
 
-    for primary in 1u32.. {
+    if flat {
+        let total = ctx.total(code)?.unwrap_or(0);
+        let mut first = 1u32;
+        while first <= total {
+            let last = first.saturating_add(CHUNK - 1).min(total);
+            let records = ctx.execute(&format!("{code}::{first}-{last}"))?;
+            if records.len() != (last - first + 1) as usize {
+                return Err(Error::InvalidDataFile {
+                    path: path.display().to_string(),
+                    detail: format!("{code}::{first}-{last} returned {} records", records.len()),
+                });
+            }
+            for (number, record) in (first..=last).zip(&records) {
+                writer
+                    .add_document(document(&fields, 0, u64::from(number), record))
+                    .map_err(|e| wrap(e, &path))?;
+                documents += 1;
+            }
+            first = last + 1;
+        }
+    }
+
+    for primary in (!flat).then_some(1u32..).into_iter().flatten() {
         let records = match ctx.execute(&format!("{code}:{primary}")) {
             Ok(records) => records,
             Err(e) if e.code() == "QQL_REFERENCE_NOT_FOUND" => {
@@ -200,18 +245,9 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
 
         for (offset, record) in records.iter().enumerate() {
             let number = offset as u64 + 1;
-            let mut document = doc!(
-                fields.primary => u64::from(primary),
-                fields.number => number,
-                fields.arabic => crate::search::fold(&record.ar),
-                fields.english => crate::search::fold(&record.en),
-            );
-            // Only the sources that have a second spelling carry one; an empty
-            // value would just add a term-less field to every other document.
-            if let (Some(field), false) = (fields.emlaei, record.emlaei.is_empty()) {
-                document.add_text(field, crate::search::fold(&record.emlaei));
-            }
-            writer.add_document(document).map_err(|e| wrap(e, &path))?;
+            writer
+                .add_document(document(&fields, u64::from(primary), number, record))
+                .map_err(|e| wrap(e, &path))?;
             documents += 1;
         }
     }
@@ -225,6 +261,22 @@ pub fn build(ctx: &mut Context, code: &str) -> Result<Report, Error> {
     }
 
     Ok(Report { documents, path })
+}
+
+/// One record as a document keyed `(primary, number)`, every field folded.
+fn document(fields: &Fields, primary: u64, number: u64, record: &crate::Record) -> TantivyDocument {
+    let mut document = doc!(
+        fields.primary => primary,
+        fields.number => number,
+        fields.arabic => crate::search::fold(&record.ar),
+        fields.english => crate::search::fold(&record.en),
+    );
+    // Only the sources that have a second spelling carry one; an empty
+    // value would just add a term-less field to every other document.
+    if let (Some(field), false) = (fields.emlaei, record.emlaei.is_empty()) {
+        document.add_text(field, crate::search::fold(&record.emlaei));
+    }
+    document
 }
 
 /// Prepare a plain term: drop stopwords, expand known alternate spellings.

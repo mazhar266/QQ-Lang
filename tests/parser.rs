@@ -362,7 +362,8 @@ fn invalid_queries() {
         ("Q::", "QQL_EXPECTED_NUMBER", Some(3)),
         ("Q::,5", "QQL_EXPECTED_NUMBER", Some(3)),
         ("Q:::1", "QQL_EXPECTED_NUMBER", Some(3)),
-        ("Q:A", "QQL_EXPECTED_NUMBER", Some(2)),
+        // `Q:A` is a path now, refused by the Quran rather than the parser:
+        // see `names_on_a_source_without_books_fail_as_they_always_did`.
         ("Q:2:", "QQL_EXPECTED_NUMBER", Some(4)),
         ("Q:2:-5", "QQL_EXPECTED_NUMBER", Some(4)),
         ("Q:2:1-", "QQL_EXPECTED_NUMBER", Some(6)),
@@ -455,4 +456,139 @@ fn errors_always_serialize_to_valid_json() {
     // Variants with no position must omit the key, not emit a placeholder.
     let json = Error::EmptyQuery.to_json("");
     assert!(json["error"].get("position").is_none());
+}
+
+/// The names of a parsed reference's path, `["OT", "GEN"]`.
+fn names(reference: &qql::Reference) -> Vec<&str> {
+    reference.path.iter().map(|s| s.name.as_str()).collect()
+}
+
+/// Names may follow a stated code — the book in `OT:GEN:1:1` — and the rest
+/// of the reference is the grammar it always was, applied inside the book.
+#[test]
+fn a_path_of_names_follows_the_code() {
+    let query = parse("OT:GEN:1:1-5").unwrap();
+    let reference = &query.references[0];
+    assert_eq!(reference.source.as_deref(), Some("OT"));
+    assert_eq!(names(reference), ["GEN"]);
+    assert_eq!(reference.primary, Some(1));
+    assert_eq!(reference.ranges, [Range { from: 1, to: 5 }]);
+    assert_eq!(reference.path[0].position, 3);
+
+    // Two names, normalized to uppercase like codes.
+    let reference = &parse("bi:ot:gen:1:1").unwrap().references[0];
+    assert_eq!(names(reference), ["OT", "GEN"]);
+
+    // A name alone is the whole book.
+    let reference = &parse("OT:GEN").unwrap().references[0];
+    assert_eq!(names(reference), ["GEN"]);
+    assert_eq!(reference.primary, None);
+    assert!(reference.ranges.is_empty() && !reference.is_search());
+
+    // Book-wide numbering inside a book, and search scoped to one.
+    let reference = &parse("OT:GEN::5").unwrap().references[0];
+    assert_eq!((reference.primary, reference.ranges[0].from), (None, 5));
+    let reference = &parse(r#"OT:GEN:"light""#).unwrap().references[0];
+    assert_eq!(names(reference), ["GEN"]);
+    assert_eq!(reference.search.as_ref().unwrap().term, "light");
+    let reference = &parse(r#"NT:JHN:3:1~5:?"love"~2"#).unwrap().references[0];
+    assert_eq!(names(reference), ["JHN"]);
+    assert_eq!(reference.primary, Some(3));
+    assert_eq!(reference.ranges, [Range { from: 1, to: 5 }]);
+}
+
+/// `1SA` lexes as an integer and an identifier; with nothing between them the
+/// parser reads one name. A space keeps them apart, as it always did.
+#[test]
+fn a_name_may_start_with_digits() {
+    let reference = &parse("NT:1JN:4:8").unwrap().references[0];
+    assert_eq!(names(reference), ["1JN"]);
+    assert_eq!(reference.primary, Some(4));
+
+    let reference = &parse("OT:2ki:5").unwrap().references[0];
+    assert_eq!(names(reference), ["2KI"]);
+
+    let error = parse("OT:1 SA:3").unwrap_err();
+    assert_eq!(error.code(), "QQL_INVALID_CHARACTER");
+    assert_eq!(error.position(), Some(5));
+}
+
+/// Groups share the path, and the path carries forward with its source.
+#[test]
+fn a_path_belongs_to_its_source() {
+    let query = parse("OT:GEN:1:1,2:3").unwrap();
+    assert_eq!(query.references.len(), 2);
+    assert!(query.references.iter().all(|r| names(r) == ["GEN"]));
+    assert_eq!(query.references[1].primary, Some(2));
+
+    let query = parse("OT:GEN:1:1;3:1").unwrap();
+    assert_eq!(names(&query.references[1]), ["GEN"]);
+    assert_eq!(query.references[1].source.as_deref(), Some("OT"));
+
+    // `OT:GEN` ends at the name, and still hands it on.
+    let query = parse("OT:GEN;2:1").unwrap();
+    assert_eq!(names(&query.references[1]), ["GEN"]);
+    assert_eq!(query.references[1].primary, Some(2));
+
+    // A newly stated code starts afresh.
+    let query = parse("OT:GEN:1:1;Q:2:255").unwrap();
+    assert!(query.references[1].path.is_empty());
+}
+
+/// The parser knows no names, so `Q:GEN` is syntax like any other. Whether
+/// the Quran takes a book is the Quran's business — see the next test.
+#[test]
+fn the_parser_knows_no_names() {
+    let reference = &parse("Q:A").unwrap().references[0];
+    assert_eq!(names(reference), ["A"]);
+    assert!(parse("XYZ:ANY:1:2").is_ok());
+}
+
+/// A query without a name serializes exactly as it did before paths existed.
+#[test]
+fn queries_without_names_serialize_unchanged() {
+    for query in ["Q:2:255", "b::100", r#"q:1:3~5:"x""#, "1,2:255"] {
+        let json = serde_json::to_string(&parse(query).unwrap()).unwrap();
+        assert!(!json.contains("path"), "{query}: {json}");
+    }
+    let json = serde_json::to_string(&parse("OT:GEN:1:1").unwrap()).unwrap();
+    assert!(json.contains(r#""path":["GEN"]"#), "{json}");
+}
+
+/// Names are legal only where an identifier used to be a syntax error, and a
+/// source that takes none refuses one with that same error, at the same byte —
+/// so every query that failed before paths existed still fails exactly so.
+/// Each expectation here is what the parser alone reported before.
+#[test]
+fn names_on_a_source_without_books_fail_as_they_always_did() {
+    // No data is read: the check runs before anything resolves.
+    let mut ctx = qql::Context::new("tests/no-such-data-directory");
+    let cases: &[(&str, &str, usize)] = &[
+        ("Q:A", "QQL_EXPECTED_NUMBER", 2),
+        ("B:A:1", "QQL_EXPECTED_NUMBER", 2),
+        ("PS:PSA:23:1", "QQL_EXPECTED_NUMBER", 3),
+        ("Q:2:255;HM:A", "QQL_EXPECTED_NUMBER", 11),
+        // An unknown code: the parser's error still comes first.
+        ("XYZ:A", "QQL_EXPECTED_NUMBER", 4),
+        // The old parser read `1` as a Surah and stopped at the letters.
+        ("Q:1SA", "QQL_INVALID_CHARACTER", 3),
+        ("Q:1SA:3", "QQL_INVALID_CHARACTER", 3),
+        // …unless the digits overflow, which fails at the digits.
+        ("Q:99999999999SA", "QQL_EXPECTED_NUMBER", 2),
+        // A later syntax error does not hide the name the old parser
+        // stopped at first.
+        (r#"Q:A"x""#, "QQL_EXPECTED_NUMBER", 2),
+        ("Q:A:", "QQL_EXPECTED_NUMBER", 2),
+        ("Q:A,5", "QQL_EXPECTED_NUMBER", 2),
+        ("Q:A;;", "QQL_EXPECTED_NUMBER", 2),
+    ];
+    for (query, code, position) in cases {
+        let error = ctx.execute(query).expect_err(query);
+        assert_eq!(error.code(), *code, "wrong code for {query:?}");
+        assert_eq!(
+            error.position(),
+            Some(*position),
+            "wrong position for {query:?}"
+        );
+    }
 }

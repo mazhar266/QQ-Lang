@@ -236,4 +236,64 @@ mod with_the_feature {
             "al-Qamar should dominate: {surahs:?}"
         );
     }
+
+    fn bible_ready() -> bool {
+        let data = std::path::Path::new(DATA);
+        data.join("vectors/BI.qv").exists() && data.join("vectors/TO.qv").exists()
+    }
+
+    /// The build script and the runtime still embed alike for an index keyed
+    /// book-wide: a stored verse, embedded again, finds itself.
+    #[test]
+    fn book_wide_indexes_embed_alike() {
+        let mut ctx = ctx!();
+        if !bible_ready() {
+            return;
+        }
+
+        for (verse, search) in [("OT:GEN:1:1", "OT:GEN:1"), ("TO:GEN:32:1", "TO:GEN:32")] {
+            let text = ctx.execute(verse).unwrap()[0].ar.clone();
+            let hits = ctx.execute(&format!("{search}:*\"{text}\"~1")).unwrap();
+            let score = hits[0].extra["score"].as_f64().unwrap();
+            assert_eq!(hits[0].ar, text, "{verse}");
+            assert!(score > 0.98, "{verse}: self-similarity is {score}");
+        }
+    }
+
+    /// `OT` searches the Bible's index as a window, and ranks as `BI:OT` does.
+    #[test]
+    fn the_testaments_are_windows_onto_the_bible() {
+        let mut ctx = ctx!();
+        if !bible_ready() {
+            return;
+        }
+
+        let key = |r: &qql::Record| {
+            (
+                r.extra["book"].clone(),
+                r.extra["chapter"].clone(),
+                r.extra["verse"].clone(),
+                r.extra["score"].clone(),
+            )
+        };
+        let ot: Vec<_> = ctx
+            .execute(r#"OT:*"the lord is my shepherd"~5"#)
+            .unwrap()
+            .iter()
+            .map(key)
+            .collect();
+        let bi: Vec<_> = ctx
+            .execute(r#"BI:OT:*"the lord is my shepherd"~5"#)
+            .unwrap()
+            .iter()
+            .map(key)
+            .collect();
+        assert!(!ot.is_empty());
+        assert_eq!(ot, bi);
+
+        for hit in ctx.execute(r#"NT:*"love one another"~10"#).unwrap() {
+            assert_eq!(hit.extra["testament"], "NT");
+            assert_eq!(hit.source, "NT");
+        }
+    }
 }

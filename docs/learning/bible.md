@@ -40,7 +40,7 @@ flowchart TD
 
 Each book shows its standard code, its English name, its Arabic name in the
 Van Dyck Bible, and its number of chapters and verses. The codes are the USFM
-abbreviations that the planned QQL syntax uses, as in `OT:GEN:1:1`. The
+abbreviations that QQL uses to name books, as in `OT:GEN:1:1`. The
 Torah's books and the Psalms also show their Hebrew names.
 
 ### Old Testament
@@ -169,7 +169,7 @@ flowchart TD
     S --> K["JHN · John<br/>21 chapters · 879 verses"]
     K --> C["Chapter 3<br/>36 verses"]
     C --> V["Verse 16"]
-    V --> R["John 3:16<br/>planned QQL: NT:JHN:3:16 · BI:NT:JHN:3:16"]
+    V --> R["John 3:16<br/>QQL: NT:JHN:3:16 · BI:NT:JHN:3:16"]
 
     classDef islamic fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
     classDef level fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
@@ -189,7 +189,7 @@ flowchart LR
     end
 ```
 
-See [the plan](../bible-plan.md) for how QQL will address the Bible.
+See the [README](../../README.md#the-bible-and-the-torah) for how QQL addresses the Bible, and [the plan](../bible-plan.md) for why.
 
 ## Not every Bible has these 66 books
 

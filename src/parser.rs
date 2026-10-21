@@ -11,7 +11,10 @@
 //!
 //! ```text
 //! query     := reference (';' reference)* ';'?
-//! reference := (source ':')? body
+//! reference := source ':' path (':' body)?   // OT:GEN, OT:GEN:1:1
+//!            | (source ':')? body
+//! path      := segment (':' segment)*        // GEN · OT:GEN
+//! segment   := ident | integer ident         // GEN · 1SA, with no space inside
 //! body      := text                      // Q:"..."   whole collection
 //!            | ':' selector              // B::100    book-wide numbering
 //!            | group (',' group)*
@@ -43,28 +46,55 @@
 //! mean. A reference with no code stated anywhere before it stays `None`, and
 //! the registry supplies the default.
 //!
+//! A **path** of names may follow a stated code — the book in `OT:GEN:1:1`.
+//! Names are allowed only there, which is exactly where an identifier is a
+//! syntax error otherwise, so no query without one changes meaning. The parser
+//! still knows no names: `Q:GEN:1:1` parses, and the Quran rejects it. A path
+//! carries forward with its source, so `OT:GEN:1:1;3:1` is Genesis twice. A
+//! book name that starts with digits, `1SA`, is read from the integer and the
+//! identifier the lexer gives for it, when nothing separates them.
+//!
 //! A `reference` can therefore produce several [`Reference`] nodes. They are
 //! appended in written order, so nothing downstream needs to know that the
 //! grouping syntax exists.
 
-use crate::ast::{MatchKind, Query, Range, Reference, Search};
+use crate::ast::{MatchKind, Query, Range, Reference, Search, Segment};
 use crate::error::Error;
 use crate::lexer::{tokenize, Kind, Token};
 
 /// Parse a query. Touches no files.
 pub fn parse(input: &str) -> Result<Query, Error> {
+    parse_tracked(input).map_err(|(error, _)| error)
+}
+
+/// The first name of each path, with the code it followed.
+pub(crate) type Names = Vec<(String, Segment)>;
+
+/// [`parse`], and on failure also every path that began before it.
+///
+/// A name after a code was itself a syntax error before paths existed. When
+/// a later error stops the parse, [`Context`](crate::Context) needs the names
+/// seen up to it: one on a source that takes none is the error the query has
+/// always reported, since the old parser stopped there first.
+pub(crate) fn parse_tracked(input: &str) -> Result<Query, (Error, Names)> {
     if input.trim().is_empty() {
-        return Err(Error::EmptyQuery);
+        return Err((Error::EmptyQuery, Vec::new()));
     }
 
-    let tokens = tokenize(input)?;
-    let mut parser = Parser { tokens, index: 0 };
-    parser.query()
+    let tokens = tokenize(input).map_err(|error| (error, Vec::new()))?;
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        names: Vec::new(),
+    };
+    parser.query().map_err(|error| (error, parser.names))
 }
 
 struct Parser<'a> {
     tokens: Vec<Token<'a>>,
     index: usize,
+    /// The first name of every path begun so far, with its code.
+    names: Names,
 }
 
 impl<'a> Parser<'a> {
@@ -98,8 +128,9 @@ impl<'a> Parser<'a> {
     /// `query := reference (';' reference)* ';'?`
     fn query(&mut self) -> Result<Query, Error> {
         let mut references = Vec::new();
-        // The most recent source stated in this query, carried forward.
-        let mut inherited: Option<String> = None;
+        // The most recent source stated in this query, with its path, carried
+        // forward.
+        let mut inherited: Option<(String, Vec<Segment>)> = None;
 
         loop {
             references.extend(self.reference(&mut inherited)?);
@@ -124,9 +155,12 @@ impl<'a> Parser<'a> {
 
     /// One source's worth of groups. `;` is only needed to change source.
     ///
-    /// `inherited` carries the last stated code forward and is updated when
-    /// this reference states one of its own.
-    fn reference(&mut self, inherited: &mut Option<String>) -> Result<Vec<Reference>, Error> {
+    /// `inherited` carries the last stated code and its path forward, and is
+    /// updated when this reference states one of its own.
+    fn reference(
+        &mut self,
+        inherited: &mut Option<(String, Vec<Segment>)>,
+    ) -> Result<Vec<Reference>, Error> {
         let token = self.peek();
         // A reference starts with a code, a number, or — for a bare search
         // like `"text"`, `?"text"` or `*"text"` — the term itself.
@@ -143,7 +177,7 @@ impl<'a> Parser<'a> {
         // none was ever stated, this stays `None` — which source that means
         // belongs to the registry, not here.
         let explicit = token.kind == Kind::Ident;
-        let source = if explicit {
+        let (source, path) = if explicit {
             let code = self.advance().text.to_ascii_uppercase();
             let token = self.peek();
             if !self.eat(Kind::Colon) {
@@ -151,10 +185,38 @@ impl<'a> Parser<'a> {
                     position: token.position,
                 });
             }
-            *inherited = Some(code.clone());
-            Some(code)
+
+            // `OT:GEN:` — names between the code and the numbers. A name is
+            // followed by `:`, or ends the reference as in `OT:GEN`.
+            let mut path = Vec::new();
+            let mut ended = false;
+            while let Some(segment) = self.segment() {
+                if path.is_empty() {
+                    self.names.push((code.clone(), segment.clone()));
+                }
+                path.push(segment);
+                if !self.eat(Kind::Colon) {
+                    ended = true;
+                    break;
+                }
+            }
+
+            *inherited = Some((code.clone(), path.clone()));
+            if ended {
+                return Ok(vec![Reference {
+                    source: Some(code),
+                    path,
+                    primary: None,
+                    ranges: Vec::new(),
+                    search: None,
+                }]);
+            }
+            (Some(code), path)
         } else {
-            inherited.clone()
+            match inherited.clone() {
+                Some((code, path)) => (Some(code), path),
+                None => (None, Vec::new()),
+            }
         };
 
         let mut references = Vec::new();
@@ -164,7 +226,7 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             Kind::Text | Kind::Similar | Kind::FullText
         ) {
-            return Ok(vec![self.search(source, None, Vec::new())?]);
+            return Ok(vec![self.search(source, path, None, Vec::new())?]);
         }
 
         // `B::100` — a second colon skips the primary. Only a source written
@@ -173,6 +235,7 @@ impl<'a> Parser<'a> {
         if explicit && self.eat(Kind::Colon) {
             references.push(Reference {
                 source: source.clone(),
+                path: path.clone(),
                 primary: None,
                 ranges: self.selector()?,
                 search: None,
@@ -191,7 +254,7 @@ impl<'a> Parser<'a> {
                     self.peek().kind,
                     Kind::Text | Kind::Similar | Kind::FullText
                 ) {
-                    references.push(self.search(source, Some(primary), Vec::new())?);
+                    references.push(self.search(source, path, Some(primary), Vec::new())?);
                     break;
                 }
 
@@ -206,7 +269,7 @@ impl<'a> Parser<'a> {
                             position: token.position,
                         });
                     }
-                    references.push(self.search(source, Some(primary), vec![scope])?);
+                    references.push(self.search(source, path, Some(primary), vec![scope])?);
                     break;
                 }
 
@@ -217,6 +280,7 @@ impl<'a> Parser<'a> {
 
             references.push(Reference {
                 source: source.clone(),
+                path: path.clone(),
                 primary: Some(primary),
                 ranges,
                 search: None,
@@ -230,10 +294,38 @@ impl<'a> Parser<'a> {
         Ok(references)
     }
 
+    /// A path name at the cursor, consumed: an identifier, or an integer with
+    /// an identifier immediately after it (`1SA`). The lexer splits the
+    /// second into two tokens; nothing between them is what makes it a name.
+    fn segment(&mut self) -> Option<Segment> {
+        let token = self.peek();
+        let name = match token.kind {
+            Kind::Ident => {
+                self.advance();
+                token.text.to_ascii_uppercase()
+            }
+            Kind::Integer => {
+                let next = self.peek_at(1);
+                if next.kind != Kind::Ident || next.position != token.position + token.text.len() {
+                    return None;
+                }
+                self.advance();
+                self.advance();
+                format!("{}{}", token.text, next.text.to_ascii_uppercase())
+            }
+            _ => return None,
+        };
+        Some(Segment {
+            name,
+            position: token.position,
+        })
+    }
+
     /// Consume a quoted term and build the search node.
     fn search(
         &mut self,
         source: Option<String>,
+        path: Vec<Segment>,
         primary: Option<u32>,
         ranges: Vec<Range>,
     ) -> Result<Reference, Error> {
@@ -274,6 +366,7 @@ impl<'a> Parser<'a> {
 
         Ok(Reference {
             source,
+            path,
             primary,
             ranges,
             search: Some(Search {

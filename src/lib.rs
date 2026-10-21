@@ -58,14 +58,16 @@ mod sources;
 #[cfg(feature = "vector")]
 pub mod vector;
 
-pub use ast::{MatchKind, Query, Range, Reference, Search};
+pub use ast::{MatchKind, Query, Range, Reference, Search, Segment};
 pub use context::Context;
 pub use error::Error;
 pub use parser::parse;
 pub use record::Record;
 pub use registry::Registry;
 pub use repo::Repository;
-pub use sources::{HadithCollection, HisnulMuslim, JsonSource, Psalms, Quran, Source, SourceSpec};
+pub use sources::{
+    Bible, HadithCollection, HisnulMuslim, IndexKeys, JsonSource, Psalms, Quran, Source, SourceSpec,
+};
 
 /// Crate version, e.g. `"3.0.0"`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

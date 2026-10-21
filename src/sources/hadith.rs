@@ -295,6 +295,7 @@ impl HadithCollection {
                 repo,
                 &Reference {
                     source: reference.source.clone(),
+                    path: Vec::new(),
                     primary: Some(chapter),
                     ranges: vec![Range {
                         from: item,
