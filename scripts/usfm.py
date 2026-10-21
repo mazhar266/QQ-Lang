@@ -63,12 +63,15 @@ def plain(text, where):
     return ' '.join(text.split())
 
 
-def read_book(path, skip_titles_in=()):
+def read_book(path, skip_titles_in=(), subscriptions=False):
     """Read one USFM book.
 
     A `\\d` title before a chapter's first verse is that chapter's title. One
     after verse text is an error, except in the chapters `skip_titles_in`
-    names: the WEB marks Psalm 119's acrostic letters with the title marker.
+    names — the WEB marks Psalm 119's acrostic letters with the title marker —
+    or anywhere when `subscriptions` is set: the Greek Textus Receptus writes
+    each epistle's closing subscription ("To the Romans, written from
+    Corinth…") that way. Neither is verse text.
     """
     verses, titles = {}, {}
     code = None
@@ -103,7 +106,7 @@ def read_book(path, skip_titles_in=()):
                 for joined in range(int(first) + 1, int(last or first) + 1):
                     verses[(chapter, joined)] = ''
             elif marker == 'd':
-                if chapter in skip_titles_in:
+                if chapter in skip_titles_in or (subscriptions and current is not None):
                     continue
                 if current is not None:
                     raise SystemExit(f'{path}:{number}: title after verse text in {chapter}')

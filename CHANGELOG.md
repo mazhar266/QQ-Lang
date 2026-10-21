@@ -43,6 +43,14 @@ for that purpose, so a change to `include/qql.h` is a major bump.
   in Hebrew numbering, with the Hebrew as `he`, JPS 1917 as `en`, and the Van
   Dyck, KJV and WEB re-cut to fit. The Torah's books also answer to their
   Hebrew names: `TO:BERESHIT:1:1`.
+- **The original languages.** Every Bible verse carries the original it was
+  translated from:
+  - Old Testament verses: `he`, the Hebrew Masoretic text, with its Aramaic
+    passages;
+  - New Testament verses: `grc`, the Greek Textus Receptus behind the KJV.
+
+  The Hebrew is placed on the English verses through the same JPS-derived map
+  the Torah uses (`scripts/hebrew.py`), so `OT:GEN:31:55` carries Hebrew 32:1.
 - **`bible_ref`** on every `TO` and `PS` record: a query for the same passage
   in `OT`, since the numberings differ. `TO:GEN:32:1` carries
   `OT:GEN:31:55`, and `PS:3:2` carries `OT:PSA:3:1`.

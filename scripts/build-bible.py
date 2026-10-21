@@ -6,26 +6,37 @@
 The 66 books of the Protestant canon, in English verse numbering, from
 eBible.org's public-domain USFM exports:
 
-    arb-vd       Smith & Van Dyck Arabic (1865)   -> ar
-    eng-kjv2006  King James Version, 1769 text    -> kjv
-    eng-web      World English Bible              -> web
+    arb-vd       Smith & Van Dyck Arabic (1865)               -> ar
+    eng-kjv2006  King James Version, 1769 text                -> kjv
+    eng-web      World English Bible                          -> web
+    hbo          Hebrew Masoretic text, Old Testament         -> he
+    grctr        Greek Textus Receptus, New Testament         -> grc
+    engjps       JPS 1917 — read only for its Hebrew verse numbers
 
 A psalm's title opens its verse 1, as English Bibles number them. The Jewish
 Torah and Psalms, in Hebrew numbering, are separate sources built by
 `build-torah.py` and `build-psalms.py`.
 
+The original languages ride alongside the translations. The Hebrew (with its
+Aramaic passages) is Hebrew-numbered, so it is placed on the English verses
+through JPS's inline Hebrew numbers: English Genesis 31:55 carries Hebrew
+32:1, and English Psalm 3:1 carries Hebrew 3:1 and 3:2. Where Hebrew joins two
+English verses into one, the Hebrew stands on the first. The Greek is the
+Textus Receptus — the text the KJV and Van Dyck were translated from — and is
+numbered as they are.
+
 Output shape matches what `src/sources/bible.rs` reads:
 
     sources/bible/books.json             66 books: code, testament, Arabic
                                          name, verse count of every chapter
-    sources/bible/{BOOK}/{chapter}.json  { verse, ar, kjv, web }
+    sources/bible/{BOOK}/{chapter}.json  { verse, ar, kjv, web, he | grc }
 
 Usage
 -----
-Fetch and unpack the three USFM zips into one directory, then point at it:
+Fetch and unpack the six USFM zips into one directory, then point at it:
 
     mkdir /tmp/usfm && cd /tmp/usfm
-    for t in arb-vd eng-kjv2006 eng-web; do
+    for t in arb-vd eng-kjv2006 eng-web hbo engjps grctr; do
         curl -sSLO https://ebible.org/Scriptures/${t}_usfm.zip && unzip -o ${t}_usfm.zip
     done
     python3 scripts/build-bible.py --from /tmp/usfm
@@ -37,14 +48,18 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hebrew as hebrew_map  # noqa: E402  (English -> Hebrew numbering, from JPS's markers)
 import usfm  # noqa: E402  (the shared USFM reader, beside this script)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'sources/bible')
 
 TEXTS = {'ar': 'arb-vd', 'kjv': 'eng-kjv2006', 'web': 'eng-web'}
+# The original languages, each for its testament.
+ORIGINALS = {'he': 'hbo', 'grc': 'grctr'}
 
 # The Protestant canon, in its order. The first 39 are the Old Testament.
 CANON = [
@@ -83,6 +98,31 @@ ANCHORS = [('Moses', 'موسى'), ('David', 'داود'), ('Jesus', 'يسوع'), 
 MIN_AGREEMENT = 0.95
 ARABIC_MARKS = set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
 
+# English verses that carry no Hebrew. Where one Hebrew verse spans two
+# English verses, it stands on the first: Hebrew Psalm 13:6 is English 13:5-6,
+# and Hebrew Isaiah 63:19 is English 63:19 and 64:1. And Nehemiah 7:68 is not
+# in the Masoretic text at all (see scripts/hebrew.py).
+EMPTY_HEBREW = {('PSA', 13, 6), ('ISA', 64, 1), ('NEH', 7, 68)}
+
+# The Greek has no verse of its own for the two closing greetings the Van Dyck
+# numbers separately; it keeps them inside the verse before, as the KJV does.
+EMPTY_GREEK = {('1TI', 6, 22), ('3JN', 1, 15)}
+
+# Names that fall in the same verses of the original and the KJV. The Hebrew
+# is matched as a whole word with its one-letter prefixes; the Greek by the
+# stem every case of the name shares (Ἰησοῦς, Ἰησοῦ, Ἰησοῦν), capitalized so
+# that πέτρα "rock" is not Peter.
+ORIGINAL_ANCHORS = [
+    ('he', 'Moses', r'[ולבכהמ]{0,2}משה'),
+    ('he', 'David', r'[ולבכהמ]{0,2}דוי?ד'),
+    ('he', 'Abraham', r'[ולבכהמ]{0,2}אברהם'),
+    ('grc', 'Jesus', r'Ιησου'),
+    ('grc', 'Paul', r'Παυλ'),
+    ('grc', 'Peter', r'Πετρ'),
+    ('grc', 'Abraham', r'Αβρααμ'),
+]
+HEBREW_MARKS = set(range(0x0591, 0x05C8)) - {0x05BE}
+
 
 def read_edition(directory, edition):
     """-> ({(book, chapter, verse): text}, {book: Arabic or English name})"""
@@ -104,6 +144,85 @@ def read_edition(directory, edition):
 
 def strip(text):
     return ''.join(c for c in text if ord(c) not in ARABIC_MARKS)
+
+
+def plain_hebrew(text):
+    """Hebrew without points or accents; a maqaf joins words, so a space."""
+    return ''.join(' ' if ord(c) == 0x05BE else c for c in text if ord(c) not in HEBREW_MARKS)
+
+
+def plain_greek(text):
+    """Greek without accents or breathings."""
+    return ''.join(c for c in unicodedata.normalize('NFD', text)
+                   if unicodedata.category(c) != 'Mn')
+
+
+def read_originals(directory, keys):
+    """The Hebrew Old Testament on the English verses, and the Greek New.
+
+    -> `({'he': {(book, chapter, verse): text}, 'grc': {…}}, problems)`
+    """
+    problems = []
+    hbo = usfm.find_books(directory, 'hbo')
+    jps = usfm.find_books(directory, 'engjps')
+    he = {}
+    for code in CANON[:39]:
+        hebrew = usfm.read_book(hbo[code]).verses
+        english = usfm.read_book(jps[code]).verses
+        if set(english) != {(c, v) for b, c, v in keys if b == code}:
+            problems.append(f'engjps {code}: English verses differ from the Bible\'s')
+            continue
+        _, targets = hebrew_map.jps_split(code, english)
+        claimed = set()
+        for verse in sorted(english):
+            parts = []
+            for target in targets[verse]:
+                if target not in hebrew:
+                    problems.append(f'{code} {verse}: Hebrew {target} does not exist')
+                elif target not in claimed:
+                    claimed.add(target)
+                    parts.append(hebrew[target])
+            he[(code, *verse)] = ' '.join(parts)
+        lost = sorted(set(hebrew) - claimed)
+        if lost:
+            problems.append(f'hbo {code}: Hebrew verses on no English verse: {lost[:5]}')
+
+    tr = usfm.find_books(directory, 'grctr')
+    grc = {}
+    for code in CANON[39:]:
+        for (chapter, verse), text in usfm.read_book(tr[code], subscriptions=True).verses.items():
+            grc[(code, chapter, verse)] = text
+    return {'he': he, 'grc': grc}, problems
+
+
+def check_originals(originals, keys, kjv):
+    problems = []
+    for key, books, expected in (('he', CANON[:39], EMPTY_HEBREW), ('grc', CANON[39:], EMPTY_GREEK)):
+        span = {k for k in keys if k[0] in books}
+        texts = originals[key]
+        stray = sorted(set(texts) - span)
+        if stray:
+            problems.append(f'{key}: verses the Bible does not number: {stray[:5]}')
+        blank = {k for k in span if not texts.get(k, '').strip()}
+        if blank != expected:
+            problems.append(f'{key}: empty {sorted(blank - expected)[:5]} unexpected, '
+                            f'{sorted(expected - blank)[:5]} expected but filled')
+
+    agreement = {}
+    for key, word, pattern in ORIGINAL_ANCHORS:
+        if key == 'he':
+            found = {k for k, t in originals[key].items()
+                     if any(re.fullmatch(pattern, w) for w in plain_hebrew(t).split())}
+        else:
+            found = {k for k, t in originals[key].items() if re.search(pattern, plain_greek(t))}
+        books = CANON[:39] if key == 'he' else CANON[39:]
+        in_kjv = {k for k, t in kjv.items() if k[0] in books and re.search(rf'\b{word}\b', t)}
+        union = found | in_kjv
+        agree = len(found & in_kjv)
+        agreement[(key, word)] = (agree, len(union))
+        if agree < MIN_AGREEMENT * len(union):
+            problems.append(f'{key}/{word}: agrees with the KJV in {agree}/{len(union)} verses')
+    return problems, agreement
 
 
 def check(data, keys):
@@ -142,7 +261,7 @@ def check(data, keys):
     return problems, agreement
 
 
-def build(data, keys, names):
+def build(data, keys, names, originals):
     if os.path.isdir(OUT):
         for entry in os.listdir(OUT):
             if entry in CANON:
@@ -159,12 +278,14 @@ def build(data, keys, names):
             counts.append(len(numbers))
             with open(os.path.join(OUT, code, f'{chapter}.json'), 'w', encoding='utf-8',
                       newline='\n') as f:
+                original = 'he' if code in OLD_TESTAMENT else 'grc'
                 json.dump({'verses': [
                     {
                         'verse': v,
                         'ar': data['ar'].get((code, chapter, v), ''),
                         'kjv': data['kjv'].get((code, chapter, v), ''),
                         'web': data['web'].get((code, chapter, v), ''),
+                        original: originals[original].get((code, chapter, v), ''),
                     }
                     for v in numbers
                 ]}, f, ensure_ascii=False, separators=(',', ':'))
@@ -208,12 +329,18 @@ def main():
             raise SystemExit(f'{key}: verses no other text numbers: {sorted(stray)[:5]}')
 
     problems, agreement = check(data, keys)
+    originals, read_problems = read_originals(args.source, keys)
+    problems += read_problems
+    original_problems, original_agreement = check_originals(originals, keys, data['kjv'])
+    problems += original_problems
+    agreement.update(original_agreement)
     ot = sum(1 for k in keys if k[0] in OLD_TESTAMENT)
     print(f'books               : {len(CANON)}')
     print(f'verses              : {len(keys)} (Old Testament {ot}, New {len(keys) - ot})')
     print(f'per text            : { {k: sum(1 for t in v.values() if t.strip()) for k, v in data.items()} }')
     for (key, word), (agree, total) in agreement.items():
-        print(f'pairing {key:<3} / {word:<8}: {agree}/{total} verses agree with the Arabic')
+        other = 'KJV' if key in ORIGINALS else 'Arabic'
+        print(f'pairing {key:<3} / {word:<8}: {agree}/{total} verses agree with the {other}')
     if problems:
         print('\nFAILED:')
         for p in problems:
@@ -223,7 +350,7 @@ def main():
 
     if args.check:
         return 0
-    build(data, keys, names)
+    build(data, keys, names, originals)
     print(f'wrote {len(CANON)} books, {len(keys)} verses to sources/bible/')
     return 0
 

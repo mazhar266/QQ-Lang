@@ -42,8 +42,14 @@ still fails, with the same error code at the same position.
   and Torah builds. It reproduces eBible's plain text for Van Dyck and the
   KJV on all 66 books. The WEB differs only where its plain-text export leaks
   speaker labels and Psalm 119 headings into verses, or carries older wording.
+- **The Bible carries its original languages** — added after phase 7. That
+  is `he` (the Masoretic Hebrew, with its Aramaic) on Old Testament verses and
+  `grc` (the Greek Textus Receptus) on New Testament ones. The Hebrew reaches
+  the English verses through `scripts/hebrew.py`, the JPS-derived map now
+  shared by all three builds. It adds one more explicit rule: Nehemiah 7:68
+  is not in the Masoretic text.
 - **Measured sizes:**
-  - Bible data: 19 MB, indexes 17 MB + 5.2 MB.
+  - Bible data: 26 MB with the originals, indexes 17 MB + 5.2 MB.
   - Torah data: 6 MB, indexes 3.2 MB + 1.2 MB.
   - Psalms data: 2 MB.
 

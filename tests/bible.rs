@@ -415,3 +415,77 @@ fn records_serialize_with_their_fields() {
         assert!(result[key].is_string(), "{key}");
     }
 }
+
+/// Each Bible verse carries its original language: Hebrew (with its Aramaic
+/// passages) for the Old Testament, Greek for the New.
+#[test]
+fn every_verse_carries_its_original_language() {
+    let mut ctx = ctx!();
+
+    // The Hebrew is fully pointed; compare its letters only.
+    let letters = |text: &str| -> String {
+        text.chars()
+            .filter(|c| ('\u{05D0}'..='\u{05EA}').contains(c) || *c == ' ')
+            .collect()
+    };
+
+    let genesis = one(&mut ctx, "OT:GEN:1:1");
+    assert!(letters(text(&genesis, "he")).starts_with("בראשית ברא אלהים"));
+    assert!(!genesis.extra.contains_key("grc"));
+
+    let john = one(&mut ctx, "NT:JHN:1:1");
+    assert!(text(&john, "grc").starts_with("Ἐν ἀρχῇ ἦν ὁ λόγος"));
+    assert!(!john.extra.contains_key("he"));
+
+    // Daniel 3 is in Aramaic: "Nebuchadnezzar the king".
+    let daniel = one(&mut ctx, "BI:OT:DAN:3:1");
+    assert!(letters(text(&daniel, "he")).starts_with("נבוכדנצר מלכא"));
+
+    // The Textus Receptus has the verses the KJV has.
+    assert!(!text(&one(&mut ctx, "NT:ACT:8:37"), "grc").is_empty());
+}
+
+/// The Hebrew is numbered differently, so it is placed on the English verses
+/// through the same map that numbers the Jewish Torah and Psalms.
+#[test]
+fn the_hebrew_sits_on_the_english_verses() {
+    let mut ctx = ctx!();
+
+    // English Genesis 31:55 is Hebrew 32:1, which is TO:GEN:32:1.
+    let english = one(&mut ctx, "OT:GEN:31:55");
+    let torah = one(&mut ctx, "TO:GEN:32:1");
+    assert_eq!(text(&english, "he"), text(&torah, "he"));
+
+    // English Psalm 3:1 is Hebrew 3:1 (the title) and 3:2.
+    let english = one(&mut ctx, "OT:PSA:3:1");
+    let hebrew: Vec<String> = ctx
+        .execute("PS:3:1-2")
+        .unwrap()
+        .iter()
+        .map(|r| text(r, "he").to_string())
+        .collect();
+    assert_eq!(text(&english, "he"), hebrew.join(" "));
+
+    // English Numbers 26:1 is Hebrew 25:19 and 26:1.
+    let english = one(&mut ctx, "OT:NUM:26:1");
+    let hebrew: Vec<String> = ctx
+        .execute("TO:NUM:25:19;TO:NUM:26:1")
+        .unwrap()
+        .iter()
+        .map(|r| text(r, "he").to_string())
+        .collect();
+    assert_eq!(text(&english, "he"), hebrew.join(" "));
+
+    // One Hebrew verse over two English ones stands on the first. Hebrew
+    // Malachi 3:19-24 is English 4:1-6, a chapter of its own.
+    assert_eq!(text(&one(&mut ctx, "OT:PSA:13:6"), "he"), "");
+    assert_eq!(
+        text(&one(&mut ctx, "OT:PSA:13:5"), "he"),
+        text(&one(&mut ctx, "PS:13:6"), "he")
+    );
+    assert!(!text(&one(&mut ctx, "OT:MAL:4:6"), "he").is_empty());
+
+    // Nehemiah 7:68 is not in the Masoretic text; 7:73 is Hebrew 7:72.
+    assert_eq!(text(&one(&mut ctx, "OT:NEH:7:68"), "he"), "");
+    assert!(!text(&one(&mut ctx, "OT:NEH:7:73"), "he").is_empty());
+}

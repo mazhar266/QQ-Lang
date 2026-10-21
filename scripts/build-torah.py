@@ -53,6 +53,7 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hebrew  # noqa: E402  (English -> Hebrew numbering, from JPS's markers)
 import usfm  # noqa: E402  (the shared USFM reader, beside this script)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -80,9 +81,6 @@ MOVES = {
     ('NUM', 29), ('NUM', 30), ('DEU', 12), ('DEU', 13), ('DEU', 22), ('DEU', 23),
     ('DEU', 28), ('DEU', 29),
 }
-# Where JPS's markers follow the lower accents and the Hebrew text does not.
-DECALOGUE = {('EXO', 20), ('DEU', 5)}
-
 # English Numbers 26:1 is Hebrew 25:19 ("And it came to pass after the
 # plague") and 26:1. The words before the cut, in each translation that cannot
 # be divided at a marker; the build checks each against the text.
@@ -107,7 +105,6 @@ MIN_AGREEMENT = 0.95
 
 HEBREW_MARKS = set(range(0x0591, 0x05C8)) - {0x05BE}
 ARABIC_MARKS = set(range(0x064B, 0x0653)) | {0x0670, 0x0640}
-MARKER = re.compile(r'\((\d+)-(\d+)\)')
 
 
 def strip(text, marks):
@@ -122,32 +119,6 @@ def strip(text, marks):
         elif ord(c) not in marks:
             out.append(c)
     return ''.join(out)
-
-
-def jps_flow(code, jps):
-    """Divide one JPS book at its Hebrew markers.
-
-    -> (segments, targets): segments[h] is the JPS text of Hebrew verse h;
-    targets[e] the Hebrew verses English verse e feeds, in order. Text before
-    any marker stays at its English number, which is the Hebrew one wherever
-    JPS marks nothing.
-    """
-    segments, targets = {}, {}
-    for (chapter, verse), text in sorted(jps.items()):
-        if (code, chapter) in DECALOGUE:
-            text = MARKER.sub('', text)
-        parts = MARKER.split(text)
-        fed = []
-        pieces = [((chapter, verse), parts[0])]
-        pieces += [((int(parts[i]), int(parts[i + 1])), parts[i + 2]) for i in range(1, len(parts), 3)]
-        for target, piece in pieces:
-            piece = piece.strip()
-            if not piece and target == (chapter, verse) and len(pieces) > 1:
-                continue  # the empty text ahead of a leading marker
-            fed.append(target)
-            segments[target] = (segments.get(target, '') + ' ' + piece).strip()
-        targets[(chapter, verse)] = list(dict.fromkeys(fed))
-    return segments, targets
 
 
 def recut(key, code, verses, targets):
@@ -278,7 +249,7 @@ def main():
         for key in ('ar', 'kjv', 'web'):
             if set(raw[key][code]) != set(raw['en'][code]):
                 raise SystemExit(f'{key} {code}: English verse references differ from JPS')
-        segments, targets = jps_flow(code, raw['en'][code])
+        segments, targets = hebrew.jps_split(code, raw['en'][code])
         for h, text in segments.items():
             data['en'][(code, *h)] = text
         for key in ('ar', 'kjv', 'web'):

@@ -10,7 +10,7 @@ Q:2:1-5,255;Q:1;
 
 Usable as an idiomatic Rust crate, or through a C ABI from any language that speaks one — Dart FFI, Python, Go, C/C++ — on Linux, Windows, macOS, Android NDK, and iOS. Not coupled to Flutter.
 
-> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim / Psalms / Bible / Torah resolvers, CLI, C ABI, and a Dart binding, with 154 Rust tests (194 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
+> **Status:** complete for v1 — parser, source registry, Quran / hadith / Hisnul Muslim / Psalms / Bible / Torah resolvers, CLI, C ABI, and a Dart binding, with 156 Rust tests (196 with both optional features) and 13 Dart tests. See [docs/plan.md](docs/plan.md) for the full design.
 
 ## Syntax
 
@@ -420,7 +420,13 @@ English verse numbering:
 
 - `ar` is the Smith & Van Dyck Arabic;
 - `en` is the King James Version;
-- `en_web` is the World English Bible.
+- `en_web` is the World English Bible;
+- the **original language**: `he`, the Hebrew Masoretic text (with its
+  Aramaic passages), on every Old Testament verse; `grc`, the Greek Textus
+  Receptus the KJV was translated from, on every New Testament verse.
+
+The Hebrew is numbered differently from English Bibles, so it is placed on
+the English verses: `OT:GEN:31:55` carries what the Hebrew numbers 32:1.
 
 `TO` is the **Jewish Torah**: the Hebrew Masoretic text as `he`, JPS 1917 as
 `en`, and the Van Dyck, KJV and WEB re-cut to the Hebrew verses as `ar`,
@@ -634,7 +640,7 @@ assert_eq!(query.references.len(), 1);
 }
 ```
 
-Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`, Psalms records use `psalm`/`verse` in Hebrew numbering and add `english_verses`, `bible_ref`, `he`, `en_kjv` and `en_web` beside the JPS 1917 `en`. Bible records carry `testament`, `book` (the USFM code), `book_name_en`, `book_name_ar`, `chapter`, `verse` and `en_web`; Torah records drop `testament` and add `book_name_he`, `he`, `en_kjv` and `bible_ref`.
+Every record carries `source`, `collection`, `ar`, and `en`. Other fields are source-specific — Hadith records use `book`/`chapter`/`number` instead of `surah`/`ayah`, Psalms records use `psalm`/`verse` in Hebrew numbering and add `english_verses`, `bible_ref`, `he`, `en_kjv` and `en_web` beside the JPS 1917 `en`. Bible records carry `testament`, `book` (the USFM code), `book_name_en`, `book_name_ar`, `chapter`, `verse`, `en_web`, and `he` (Old Testament) or `grc` (New Testament); Torah records drop `testament` and add `book_name_he`, `he`, `en_kjv` and `bible_ref`.
 
 ### Two Arabic spellings
 
@@ -897,7 +903,7 @@ sources/
   hisnul-muslim/husn_en.json         all 132 chapters in one file
   psalms/{1..150}.json               Hebrew + JPS + Arabic + KJV + WEB, per psalm
   bible/books.json                   the 66 books: Arabic names, verses per chapter
-  bible/{BOOK}/{chapter}.json        Arabic + KJV + WEB, English numbering
+  bible/{BOOK}/{chapter}.json        Arabic + KJV + WEB + Hebrew or Greek, English numbering
   torah/books.json                   the five books, in Hebrew numbering
   torah/{BOOK}/{chapter}.json        Hebrew + JPS + Arabic + KJV + WEB
   canonical/{CODE}.json              citation-number maps for B::N
@@ -976,7 +982,7 @@ what the build changes.
 ### So are the Bible and the Torah
 
 ```bash
-python3 scripts/build-bible.py --from DIR    # sources/bible/  (arb-vd, eng-kjv2006, eng-web)
+python3 scripts/build-bible.py --from DIR    # sources/bible/  (arb-vd, eng-kjv2006, eng-web, hbo, engjps, grctr)
 python3 scripts/build-torah.py --from DIR    # sources/torah/  (hbo, engjps, arb-vd, eng-kjv2006, eng-web)
 ```
 
@@ -992,7 +998,11 @@ export, it reproduces the Van Dyck and the KJV word for word, all 31,104 and
   - the WEB omits four verses and places Romans' doxology after 14:23.
 
   *Moses*, *David*, *Jesus* and *Abraham* must also fall in the same verses
-  across the Arabic and both English texts.
+  across the Arabic and both English texts. The Hebrew is placed on the
+  English verses through [scripts/hebrew.py](scripts/hebrew.py), the same
+  map the Torah and Psalms builds use. Every Hebrew verse must land on exactly
+  one English verse, and both originals must agree with the KJV on where the
+  anchor names fall.
 - **`build-torah.py`** re-cuts the translations to the Hebrew verses, as the
   Psalms build does. JPS is divided at its inline Hebrew numbers, except in
   the Ten Commandments, where JPS follows a different accent tradition from

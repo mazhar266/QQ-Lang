@@ -60,6 +60,7 @@ cp LICENSE.md README.md "$out/"
     "$bin" --compact 'hm:1:1'          | grep -q '"ok":true'
     "$bin" --compact 'ps::1'           | grep -q '"psalm":1,'
     "$bin" --compact 'nt:jhn:3:16'     | grep -q '"book":"JHN"'
+    "$bin" --compact 'nt:jhn:1:1'      | grep -q '"grc":'
     "$bin" --compact 'to:gen:32:1'     | grep -q '"bible_ref":"OT:GEN:31:55"'
     "$bin" --compact 'ot:?"covenant"~1' | grep -q '"ranked":true'
 )

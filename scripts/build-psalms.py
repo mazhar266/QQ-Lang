@@ -48,6 +48,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hebrew as hebrew_map  # noqa: E402  (English -> Hebrew numbering, from JPS's markers)
 import usfm  # noqa: E402  (the shared USFM reader, beside this script)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,15 +68,6 @@ TEXTS = {
 
 # The alphabetic acrostic whose stanza headings some exports mark as titles.
 ACROSTIC = 119
-
-# JPS opens five psalms with the Psalter's book headings, which every other
-# section heading in the export has had stripped. They are not text.
-JPS_BOOK = re.compile(r'^BOOK [IV]+\s+')
-JPS_BOOK_PSALMS = {1, 42, 73, 90, 107}
-
-# JPS gives Psalm 70 no Hebrew verse markers, though its Hebrew title is a
-# verse of its own. The one cut it needs: the title ends with these words.
-JPS_UNMARKED = {70: 'to make memorial.'}
 
 # Words that fall in the same Hebrew verses in every text — the proof that the
 # re-cutting is right. Selah sits at the end of a verse; David is mostly in
@@ -103,68 +95,6 @@ def read_psalter(directory, edition):
     # BETH…) with the title marker.
     book = usfm.read_book(books['PSA'], skip_titles_in={ACROSTIC})
     return book.verses, book.titles
-
-
-def jps_flow(jps, hebrew):
-    """Split JPS at its Hebrew markers.
-
-    Returns (segments, targets): segments[h] is the JPS text of Hebrew verse
-    h; targets[e] is the ordered list of Hebrew verses English verse e feeds.
-    Text runs into the current Hebrew verse until a marker moves it on.
-    """
-    segments, targets = {}, {}
-    removed = 0
-    for psalm in range(1, PSALM_COUNT + 1):
-        english = sorted(v for p, v in jps if p == psalm)
-        texts = {}
-        for v in english:
-            text = jps[(psalm, v)]
-            if v == 1 and psalm in JPS_BOOK_PSALMS:
-                text, n = JPS_BOOK.subn('', text)
-                removed += n
-            texts[v] = text
-
-        marked = any(re.search(r'\(\d+-\d+\)', t) for t in texts.values())
-        hebrew_count = sum(1 for p, _ in hebrew if p == psalm)
-        if not marked and hebrew_count != len(english):
-            cut = JPS_UNMARKED.get(psalm)
-            if cut is None:
-                raise SystemExit(f'JPS {psalm}: unmarked, but Hebrew has {hebrew_count} verses')
-            title, found, rest = texts[1].partition(cut)
-            if not found:
-                raise SystemExit(f'JPS {psalm}: cut {cut!r} not found')
-            texts[1] = f'({psalm}-1) {title}{cut} ({psalm}-2) {rest.strip()}'
-            for v in english[1:]:
-                texts[v] = f'({psalm}-{v + 1}) {texts[v]}'
-            marked = True
-
-        current = None
-        for v in english:
-            if not marked:
-                current = (psalm, v)
-                targets[(psalm, v)] = [current]
-                segments[current] = texts[v]
-                continue
-            parts = re.split(r'\((\d+)-(\d+)\)', texts[v])
-            fed = []
-            lead = parts[0].strip()
-            if lead:
-                # Text ahead of any marker opens the psalm (81:1 has no
-                # "(81-1)") or continues the verse already running (13:6).
-                current = current or (psalm, 1)
-                fed.append(current)
-                segments[current] = (segments.get(current, '') + ' ' + lead).strip()
-            for i in range(1, len(parts), 3):
-                current = (int(parts[i]), int(parts[i + 1]))
-                if current[0] != psalm:
-                    raise SystemExit(f'JPS {psalm}:{v}: marker for psalm {current[0]}')
-                fed.append(current)
-                piece = parts[i + 2].strip()
-                segments[current] = (segments.get(current, '') + ' ' + piece).strip()
-            targets[(psalm, v)] = list(dict.fromkeys(fed))
-    if removed != len(JPS_BOOK_PSALMS):
-        raise SystemExit(f'JPS: removed {removed} book headings, expected {len(JPS_BOOK_PSALMS)}')
-    return segments, targets
 
 
 def recut(name, verses, titles, targets, hebrew):
@@ -278,7 +208,7 @@ def main():
         if set(raw[key][0]) != set(raw['en'][0]):
             raise SystemExit(f'{key}: English verse references differ from JPS')
 
-    segments, targets = jps_flow(raw['en'][0], hebrew)
+    segments, targets = hebrew_map.jps_split('PSA', raw['en'][0])
     data = {'he': hebrew, 'en': {h: segments.get(h, '') for h in hebrew}}
     empties = {}
     for key in ('ar', 'kjv', 'web'):
