@@ -32,11 +32,11 @@ Two optional search engines, both off by default. Both index sets are
 committed, so a checkout searches without a build step:
 
 ```bash
-python3 scripts/build-vectors.py                       # sources/vectors/*.qv  (committed, ~90 s, 33 MB)
+python3 scripts/build-vectors.py                       # sources/vectors/*.qv  (committed, 53 MB)
 cargo test --features vector
 cargo run --features vector -- 'q:*"worship"~3'
 
-cargo run --features fulltext --bin qql-index          # sources/fulltext/*/   (committed, ~3 s, 16 MB)
+cargo run --features fulltext --bin qql-index          # sources/fulltext/*/   (committed, 29 MB)
 cargo test --features fulltext
 cargo run --features fulltext -- 'q:?"mercy"~5'
 ```

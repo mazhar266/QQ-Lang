@@ -126,6 +126,6 @@ All of them fall out of the `crate-type` list in the root `Cargo.toml`.
 
 The data directory must also ship with the app; on Android and iOS that means
 copying `sources/` into app storage at first launch and passing that path to
-`Qql.open`. That includes `sources/vectors/` (~21 MB) if you build with
-`vector`, and `sources/fulltext/` (~16 MB) if you build with `fulltext` —
+`Qql.open`. That includes `sources/vectors/` (~53 MB) if you build with
+`vector`, and `sources/fulltext/` (~29 MB) if you build with `fulltext` —
 budget for them before enabling either on a low-end device.

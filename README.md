@@ -181,7 +181,7 @@ Backed by [tantivy](https://github.com/quickwit-oss/tantivy). A large
 dependency, so it is a feature, **off by default**:
 
 ```toml
-qql = { version = "0.1", features = ["fulltext"] }
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0", features = ["fulltext"] }
 ```
 
 ```bash
@@ -228,8 +228,8 @@ syntax is passed through untouched, so `?'"the straight path"'` still means
 exactly what it says.
 
 The indexes are committed, like the vector ones, so a checkout can search
-without a build step. Rebuild after changing text — about eleven seconds for
-all 18 sources, 23 MB:
+without a build step. Rebuild after changing text — 21 indexed sources,
+29 MB in all:
 
 ```bash
 cargo run --features fulltext --bin qql-index
@@ -246,7 +246,7 @@ A `*` in front asks for *similar* rather than *contains*. It is a cargo feature,
 extra assets:
 
 ```toml
-qql = { version = "0.1", features = ["vector"] }
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0", features = ["vector"] }
 ```
 
 ```bash
@@ -313,20 +313,21 @@ alongside the original one rather than replacing it.
 
 | | |
 | --- | --- |
-| Index size | ~5.3 MB Quran, ~33 MB all 18 sources (weights included) |
+| Index size | ~5.1 MB Quran, ~17 MB the Bible, ~53 MB all 21 indexed sources (weights included) |
 | Query | hash the term, then a flat `int8` dot-product scan |
 | Structure | none — no ANN index, nothing to fall out of sync |
 
-At ~40,000 records corpus-wide a flat scan is a few million integer
-multiply-accumulates; an approximate-nearest-neighbour index would add a large
-dependency and a second artifact that can drift, to beat something already
-fast enough on a weak core. Scoping narrows the scan further.
+A scan covers one source, and the largest — the whole Bible, 31,104 verses —
+is about eight million integer multiply-accumulates; an
+approximate-nearest-neighbour index would add a large dependency and a second
+artifact that can drift, to beat something already fast enough on a weak
+core. Scoping narrows the scan further.
 
-All eight indexes are committed, so the feature works without a build step.
+All 21 indexes are committed, so the feature works without a build step.
 Rebuild after changing text:
 
 ```bash
-python3 scripts/build-vectors.py              # all sources, ~90 s, 21 MB
+python3 scripts/build-vectors.py              # all sources, 53 MB
 python3 scripts/build-vectors.py --source Q   # just one
 ```
 
@@ -592,8 +593,11 @@ Output is pretty-printed JSON, exit code `0` on success and `1` on error — the
 
 ```toml
 [dependencies]
-qql = "0.1"
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0" }
 ```
+
+QQL is not on crates.io — the `qql` crate there is an unrelated project, so
+depend on the repository by tag.
 
 ```rust
 use qql::{Context, Error};
