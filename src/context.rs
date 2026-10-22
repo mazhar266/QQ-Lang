@@ -521,8 +521,10 @@ impl Context {
 
         // `Q:"text"` names no scope at all, so run the collection's whole
         // flat axis. A source without one says so rather than searching a
-        // silently narrower slice.
-        if scope.primary.is_none() && scope.ranges.is_empty() {
+        // silently narrower slice. A path is a scope already — `OT:GEN:"x"`
+        // is all of Genesis, which the resolver reads without a range, and
+        // the source's total would overrun the book.
+        if scope.path.is_empty() && scope.primary.is_none() && scope.ranges.is_empty() {
             let total = source.total(repo)?.ok_or_else(|| Error::Unsupported {
                 detail: format!(
                     "{} cannot be searched whole; scope the search, as in {}:1:\"...\"",

@@ -266,6 +266,36 @@ fn exact_search_reaches_books_and_testaments() {
     assert!(hits.len() > 5);
     assert!(hits.iter().all(|r| r.extra["testament"] == "NT"));
 
+    // A book with no chapter is the whole book, and finds what its chapters
+    // find between them — in either edition, and through `BI` with the
+    // testament named on the way.
+    for (book, through) in [
+        ("OT:GEN", "OT:GEN"),
+        ("TO:GEN", "TO:GEN"),
+        ("OT:GEN", "BI:OT:GEN"),
+    ] {
+        let by_chapter: Vec<_> = (1..=50)
+            .flat_map(|c| ctx.execute(&format!(r#"{book}:{c}:"Pharaoh""#)).unwrap())
+            .map(|r| place(&r))
+            .collect();
+        let whole = ctx.execute(&format!(r#"{through}:"Pharaoh""#)).unwrap();
+        assert!(!by_chapter.is_empty(), "{through}");
+        assert_eq!(
+            whole.iter().map(place).collect::<Vec<_>>(),
+            by_chapter,
+            "{through}"
+        );
+    }
+
+    // A testament through `BI` is the testament's own code.
+    let through_bible: Vec<_> = ctx
+        .execute(r#"BI:NT:"Melchisedec""#)
+        .unwrap()
+        .iter()
+        .map(place)
+        .collect();
+    assert_eq!(through_bible, hits.iter().map(place).collect::<Vec<_>>());
+
     // Arabic without its marks, as anyone would type it.
     let hits = ctx.execute(r#"NT:JHN:3:"احب الله العالم""#).unwrap();
     assert_eq!(hits.iter().map(|r| place(r).2).collect::<Vec<_>>(), [16]);
