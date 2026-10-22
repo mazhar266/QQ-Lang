@@ -101,15 +101,24 @@ fn main() -> ExitCode {
             Ok(parsed) => serde_json::json!({
                 "ok": true,
                 "query": query,
-                "references": parsed.references.iter().map(|r| serde_json::json!({
-                    "source": r.source,
-                    "primary": r.primary,
-                    "all": r.selects_all(),
-                    "ranges": r.ranges.iter()
-                        .map(|range| [range.from, range.to])
-                        .collect::<Vec<_>>(),
-                    "search": r.search,
-                })).collect::<Vec<_>>(),
+                "references": parsed.references.iter().map(|r| {
+                    let mut reference = serde_json::json!({
+                        "source": r.source,
+                        "primary": r.primary,
+                        "all": r.selects_all(),
+                        "ranges": r.ranges.iter()
+                            .map(|range| [range.from, range.to])
+                            .collect::<Vec<_>>(),
+                        "search": r.search,
+                    });
+                    // Only a query that names a book has a path, so every
+                    // other query prints exactly what it always did.
+                    if !r.path.is_empty() {
+                        reference["path"] =
+                            r.path.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().into();
+                    }
+                    reference
+                }).collect::<Vec<_>>(),
             }),
             Err(e) => e.to_json(&query),
         }

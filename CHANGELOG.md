@@ -114,6 +114,8 @@ gained a field (see *Compatibility*).
 - `qql::parse` itself, and so `qql --parse`, now accepts a name after any code
   (`Q:GEN` parses, and the Quran refuses it at execution). Executing the query
   fails as before.
+- `qql --parse` prints the names as `path` (`"path":["OT","GEN"]`). A query
+  without names prints exactly what it did.
 - **Rust API:** `Reference` gains a public `path` field, so code that builds a
   `Reference` with a struct literal must add `path: Vec::new()`. `Source`
   gains only default methods (`has_books`, `index_keys`, `flat_offset`,
