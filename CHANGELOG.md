@@ -4,7 +4,7 @@ QQL's lineage, by what each version taught the language to do:
 
 | Version | Adds | Query |
 | --- | --- | --- |
-| **[Unreleased](#unreleased--the-bible-the-torah-and-the-psalms)** | the Bible, the Torah and the Psalms | `NT:JHN:3:16` |
+| **[4.0](#400--the-bible-the-torah-and-the-psalms)** | the Bible, the Torah and the Psalms | `NT:JHN:3:16` |
 | **[3.6](#360--spelling)** | search that survives spelling | `q:?"quran is easy"` |
 | **[3.2](#320--ten-more-collections)** | ten more hadith collections | `RS:1:1` |
 | **[3.0](#300--indexed-search)** | indexed full-text search | `q:1:?"mercy"` |
@@ -21,7 +21,13 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ---
 
-## Unreleased — The Bible, the Torah and the Psalms
+## 4.0.0 — The Bible, the Torah and the Psalms
+
+The scriptures before the Quran: the Torah, the Psalms and the rest of the
+Bible, each with the text it was written in. A query names a book now, so the
+grammar grew a path — which is the only reason this is a major version. No
+query changes meaning and the C ABI is untouched; the Rust `Reference` struct
+gained a field (see *Compatibility*).
 
 ### Added
 

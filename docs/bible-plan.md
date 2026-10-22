@@ -1,7 +1,7 @@
 # Plan — the Bible (`BI`, `OT`, `NT`), the Torah (`TO`) and the Psalms (`PS`)
 
-**Status:** phases 0–7 implemented on `feat/bible-adoption` (2026-10-21).
-Phase 8 is optional and not started. Decisions 6 and 8 are still open (§10).
+**Status:** phases 0–7 implemented and released as **4.0.0** (2026-10-22).
+Phase 8 is optional and not started. Decision 8 is still open (§10).
 Where the build departed from this plan, the next section says so; the rest
 of the document is the design as planned.
 
@@ -433,7 +433,7 @@ combinations.
 | 4 | **`BI` `OT` `NT` resolvers.** The book table, every address form, exact search, book-wide numbering. `PS` gains `bible_ref`. **Done.** | the new codes |
 | 5 | **Ranked Bible search.** Flat-keyed index, windows, the `BI` index set. **Done.** | `?` and `*` on the Bible |
 | 6 | **Jewish `TO`.** `build-torah.py`, the resolver, its index, `bible_ref`. **Done.** | `TO` |
-| 7 | **Docs and release.** README, CHANGELOG, CLAUDE.md, Dart README, `package.sh` bundle and smoke lines, the version. **Done**, bar the version (decision 6). | none |
+| 7 | **Docs and release.** README, CHANGELOG, CLAUDE.md, Dart README, `package.sh` bundle and smoke lines, the version. **Done** — released as 4.0.0. | none |
 | 8 | **Optional.** Comma groups that switch book (`OT:GEN:1:1,EXO:3:14`); an unknown-source hint ("EXO is a book — write OT:EXO:3:14"); searchable Hebrew; an Injil view (the four Gospels); aliases `BIBLE`, `TORAH`, `TAWRAT`. | as chosen |
 
 Building them needs new downloads from eBible.org, which I will list with
@@ -481,7 +481,7 @@ sizes and ask about before fetching: `hbo`, `engjps`, and `arb-vd` in USFM.
 | 3 | May `BI` omit the testament (`BI:GEN:1:1`)? | **Built: yes** — book codes are unique, and a stated testament is still checked |
 | 4 | Arabic for `TO` and `PS` | **Built: Van Dyck re-numbered**, labelled; Saadia later if a usable text appears (§2.3) |
 | 5 | Verses that only one text has: carry them with `""` elsewhere? | **Built: yes**, matching the existing convention |
-| 6 | Version: `Reference` gains a public field | **Open.** Recommend **4.0.0** if outside crates may build `Reference`; otherwise 3.7.0 with a note |
+| 6 | Version: `Reference` gains a public field | **Decided: 4.0.0** — the field breaks struct literals, so it is a major bump |
 | 7 | Should `PS` keep the KJV and WEB too? | **Decided: keep** — re-cut to the Hebrew verses like the Arabic |
 | 8 | Aliases `BIBLE`, `TORAH`, `TAWRAT`? | **Open** — not added; your call, one line each |
 

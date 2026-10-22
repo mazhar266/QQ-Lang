@@ -559,13 +559,13 @@ Tagged releases ship self-contained bundles per platform — the `qql` CLI,
 Extract and run; no build, no setup:
 
 ```bash
-tar xzf qql-v3.0.0-x86_64-linux.tar.gz
-cd qql-v3.0.0-x86_64-linux
+tar xzf qql-v4.0.0-x86_64-linux.tar.gz
+cd qql-v4.0.0-x86_64-linux
 ./qql 'Q:2:255'
 ./qql 'q:1:?"mercy"~5'        # both search engines included
 ```
 
-Maintainers cut one by pushing a tag: `git tag v3.1.0 && git push origin v3.1.0`. The tag alone decides the version — it is stamped into the build, so no `Cargo.toml` bump commit is needed first.
+Maintainers cut one by pushing a tag: `git tag v4.0.0 && git push origin v4.0.0`. The tag alone decides the version — it is stamped into the build, so no `Cargo.toml` bump commit is needed first.
 
 ## CLI
 
