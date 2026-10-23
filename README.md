@@ -187,7 +187,7 @@ Backed by [tantivy](https://github.com/quickwit-oss/tantivy). A large
 dependency, so it is a feature, **off by default**:
 
 ```toml
-qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0", features = ["fulltext"] }
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.1.0", features = ["fulltext"] }
 ```
 
 ```bash
@@ -252,7 +252,7 @@ A `*` in front asks for *similar* rather than *contains*. It is a cargo feature,
 extra assets:
 
 ```toml
-qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0", features = ["vector"] }
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.1.0", features = ["vector"] }
 ```
 
 ```bash
@@ -566,13 +566,13 @@ Tagged releases ship self-contained bundles per platform — the `qql` CLI,
 Extract and run; no build, no setup:
 
 ```bash
-tar xzf qql-v4.0.0-x86_64-linux.tar.gz
-cd qql-v4.0.0-x86_64-linux
+tar xzf qql-v4.1.0-x86_64-linux.tar.gz
+cd qql-v4.1.0-x86_64-linux
 ./qql 'Q:2:255'
 ./qql 'q:1:?"mercy"~5'        # both search engines included
 ```
 
-Maintainers cut one by pushing a tag: `git tag v4.0.0 && git push origin v4.0.0`. The tag alone decides the version — it is stamped into the build, so no `Cargo.toml` bump commit is needed first.
+Maintainers cut one by pushing a tag: `git tag v4.1.0 && git push origin v4.1.0`. The tag alone decides the version — it is stamped into the build, so no `Cargo.toml` bump commit is needed first.
 
 ## CLI
 
@@ -599,7 +599,7 @@ Output is pretty-printed JSON, exit code `0` on success and `1` on error — the
 
 ```toml
 [dependencies]
-qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.0.0" }
+qql = { git = "https://github.com/mazhar266/QQ-Lang", tag = "v4.1.0" }
 ```
 
 QQL is not on crates.io — the `qql` crate there is an unrelated project, so

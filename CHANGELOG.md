@@ -4,6 +4,7 @@ QQL's lineage, by what each version taught the language to do:
 
 | Version | Adds | Query |
 | --- | --- | --- |
+| **[4.1](#410--names)** | aliases that find the name, not a fragment or a namesake | `q:"eisa"` |
 | **[4.0](#400--the-bible-the-torah-and-the-psalms)** | the Bible, the Torah and the Psalms | `NT:JHN:3:16` |
 | **[3.6](#360--spelling)** | search that survives spelling | `q:?"quran is easy"` |
 | **[3.2](#320--ten-more-collections)** | ten more hadith collections | `RS:1:1` |
@@ -21,7 +22,14 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ---
 
-## Unreleased
+## 4.1.0 — Names
+
+Alias expansion stopped finding the wrong words and the wrong people. A
+spelling the table supplies must now stand as a whole word, and a prophet's
+English name no longer reaches the narrators who share his Arabic one. Both
+change results, which is why they are recorded at length below. No query
+changes its syntax, no index is rebuilt, and the C ABI and the Rust API are
+untouched.
 
 ### Fixed
 

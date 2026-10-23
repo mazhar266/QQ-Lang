@@ -1,6 +1,6 @@
 [package]
 name = "qql"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Quran Query Language — parse compact references to Islamic texts and resolve them against local JSON data"
