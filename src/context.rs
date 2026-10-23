@@ -539,21 +539,14 @@ impl Context {
         source.resolve(repo, &scope, &mut candidates)?;
 
         // A single word may be spelled several ways — `koran` for `Qur'an`,
-        // `abraham` for `ibrahim`. Only single-word needles expand: a longer
-        // needle is a literal substring, and substituting inside one would
-        // produce a phrase nobody wrote.
-        let folded = crate::search::fold(needle);
-        let needles: Vec<String> = match crate::search::aliases(&folded) {
-            [] => vec![folded],
-            group => group.iter().map(|w| (*w).to_string()).collect(),
-        };
+        // `abraham` for `ibrahim`. The typed term is a substring; the other
+        // spellings must be whole words, or `isa` would find *Isaac*.
+        let needle = crate::search::Needle::new(needle);
 
         out.extend(candidates.into_iter().filter(|record| {
-            needles.iter().any(|needle| {
-                crate::search::matches(&record.ar, needle)
-                    || crate::search::matches(&record.emlaei, needle)
-                    || crate::search::matches(&record.en, needle)
-            })
+            needle.found_in(&record.ar)
+                || needle.found_in(&record.emlaei)
+                || needle.found_in(&record.en)
         }));
 
         Ok(())

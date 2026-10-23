@@ -21,6 +21,79 @@ for that purpose, so a change to `include/qql.h` is a major bump.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **An alternate spelling matches only as a whole word.** Exact search
+  expands a single word through the alias table, and every spelling was
+  matched as a plain substring, so `q:"jesus"` also looked for `isa`, which
+  sits inside *Isaac*, *Isaiah*, *disaster* and *qisas*. It returned 88 ayat
+  for the 33 that name him. `b:"jesus"` returned 173 hadith for 42, and
+  `ot:gen:"jesus"` returned 77 verses, every one of them about Isaac. The
+  spellings the table supplies must now stand as words, with one trailing `s`
+  allowed because folding turns *Abraham's* into `abrahams`. Those three
+  searches now return 33, 42 and nothing. `b:"pilgrimage"` stops matching
+  *tahajjud* and *al-Hajjaj* through `haj` (295 → 213 hadith).
+- **`eisa` joins `isa` and `jesus`.** Tirmidhi, Ibn Majah and an-Nasa'i write
+  *'Eisa*, which `isa` used to reach only from inside the longer word. A
+  reader who knows that spelling now reaches the others: `q:"eisa"` finds the
+  33 ayat that name him.
+
+The word you typed is still a substring, so `"mercif"` finds *merciful* as
+before. Only the substituted spellings are held to word boundaries, and a few
+genuine hits that reached one through a longer word are gone: `"koran"` no
+longer finds a record that says only *Quranic*, and `"pilgrimage"` misses one
+that says only *Hajjat al-Wada'*. Typing the word itself (`"quran"`, `"hajj"`)
+still finds them. The ranked engines compare whole tokens already, so the
+word rule is exact search's alone.
+
+### Changed
+
+- **A prophet's name expands one way, from Arabic to English.** `"musa"`
+  still finds *Moses*; `"moses"` no longer looks for `musa`. Narrators,
+  scholars and authors carry the prophets' names, and a reader who types the
+  English one means the prophet alone. `ma:"john"` reached `yahya` and
+  returned 1577 hadith of the Muwatta, nearly every one opening *Yahya related
+  to me from Malik*. `ad:"david"` returned 757, nearly all for *Abu Dawud
+  said*, and `b:"moses"` returned 132, 49 of them through Abu Musa. They now
+  return 0, 4 and 83. The Quran, Psalms, Bible and Torah lose nothing, since
+  their translations print the English names, and an Arabic name reaches the
+  English one as before (`q:"yahya"` still finds the five ayat naming
+  *John*). All three engines read the same table, so `?"…"` and `*"…"` change
+  with it.
+
+  What the fifteen English names stop matching, counted over every numbered
+  chapter (a record lost to two names counts twice):
+
+  | Collection | Matches lost | The prophet, roughly |
+  | --- | ---: | ---: |
+  | `MA` Muwatta Malik | 1777 | 10 |
+  | `MK` Mishkat al-Masabih | 1299 | 7 |
+  | `AD` Abu Dawud | 1183 | 18 |
+  | `M` Muslim | 349 | 41 |
+  | `T` Tirmidhi | 337 | 45 |
+  | `N` an-Nasa'i | 211 | 55 |
+  | `B` Bukhari | 130 | 8 |
+  | `BM` Bulugh al-Maram | 127 | 1 |
+  | `IM` Ibn Majah | 109 | 30 |
+  | `AM` al-Adab al-Mufrad | 65 | 11 |
+  | `RS` Riyad as-Salihin | 21 | 10 |
+  | `SM` `QD` `NW` `HM` | 16 | 0 |
+  | `Q` `PS` `BI` `TO` `DA` `SW` | 0 | — |
+  | **Total** | **5624** | **236** |
+
+  The last column comes from a context rule: *peace be upon him* after the
+  name, *go to*, *Surat* or *the fast of* before it, or a prophet as the
+  father. Treat it as an estimate. The rest are namesakes (about 5,050) or
+  unclear (about 330, often Ibrahim the Prophet's son). Those ~240 are the
+  cost: some translations print the Arabic name for the prophet himself —
+  Tirmidhi's *'Eisa*, an-Nasa'i's *the fast of Dawud* — so `t:"jesus"` now
+  finds nothing. Search the Arabic name there (`t:"eisa"`, `n:"dawud"`),
+  which asks for anyone who bears it.
+
+---
+
 ## 4.0.0 — The Bible, the Torah and the Psalms
 
 The scriptures before the Quran: the Torah, the Psalms and the rest of the

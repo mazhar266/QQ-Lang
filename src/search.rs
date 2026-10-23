@@ -12,8 +12,10 @@
 //!
 //! A record matches when the folded needle appears in any of its folded text
 //! fields — Arabic, the simplified `emlaei` spelling where a source has one,
-//! or English. Folding lowercases ASCII and, for Arabic, drops the marks that
-//! a reader would not type:
+//! or English. A single word also matches under its other spellings from the
+//! alias table, though only as a whole word; see [`Needle`]. Folding
+//! lowercases ASCII and, for Arabic, drops the marks that a reader would not
+//! type:
 //!
 //! - harakat and sukun (`U+064B..U+0652`), the superscript alef (`U+0670`),
 //!   and the Quranic annotation marks (`U+06D6..U+06ED`);
@@ -72,13 +74,70 @@ pub fn fold(text: &str) -> String {
     out
 }
 
-/// Whether `haystack` contains `needle`, both folded.
-pub fn matches(haystack: &str, needle: &str) -> bool {
-    !needle.is_empty() && fold(haystack).contains(needle)
+/// What an exact search looks for: the term as typed and, when it is a single
+/// word with [aliases], that word's other spellings.
+///
+/// The two are held to different standards. The typed term is a plain
+/// substring, as it always was — `"mercif"` finds *merciful*, and a reader who
+/// types a fragment is asking for one. The other spellings must stand as
+/// whole words, because nobody typed them: `jesus` expands to `isa`, and as a
+/// substring `isa` sits inside *Isaac*, *Isaiah*, *disaster* and *qisas* —
+/// 1223 records across the corpus, against 56 where it stands as a word.
+pub struct Needle {
+    typed: String,
+    group: &'static [&'static str],
 }
 
-/// Other spellings of a folded word — transliteration variants, and the
-/// English names the translations use for prophets.
+impl Needle {
+    /// Fold `term` and look up its other spellings.
+    ///
+    /// Only a single word expands. A longer term is a literal substring, and
+    /// substituting inside one would produce a phrase nobody wrote.
+    pub fn new(term: &str) -> Self {
+        let typed = fold(term);
+        let group = aliases(&typed);
+        Needle { typed, group }
+    }
+
+    /// Whether `haystack`, folded, holds the term or one of its spellings.
+    pub fn found_in(&self, haystack: &str) -> bool {
+        if self.typed.is_empty() {
+            return false;
+        }
+        let folded = fold(haystack);
+        folded.contains(&self.typed)
+            || self
+                .group
+                .iter()
+                .any(|word| *word != self.typed && contains_word(&folded, word))
+    }
+}
+
+/// Whether `word` stands whole in `folded`: no letter directly before it, and
+/// none after it but an optional `s`.
+///
+/// A letter is anything `char::is_alphabetic`, so Arabic letters are word
+/// characters as much as Latin ones, while digits and punctuation are not — a
+/// footnote marker glued to a name (`Jesus3`) leaves the name whole. No alias
+/// is Arabic today; one that was would also have to allow for the clitics
+/// (`و`, `ب`, `ال`) that are written joined to the word.
+///
+/// The `s` is there because folding drops the apostrophe: *Abraham's* folds
+/// to `abrahams`, and without it `ibrahim` would miss the records that name
+/// him only in the possessive. It also lets `masjid` find *mosques*.
+fn contains_word(folded: &str, word: &str) -> bool {
+    let letter = |c: Option<char>| c.is_some_and(char::is_alphabetic);
+    let ends = |rest: &str| !letter(rest.chars().next());
+    folded.match_indices(word).any(|(start, _)| {
+        let rest = &folded[start + word.len()..];
+        !letter(folded[..start].chars().next_back())
+            && (ends(rest) || rest.strip_prefix('s').is_some_and(ends))
+    })
+}
+
+/// Other spellings of a folded word — transliteration variants, each reaching
+/// the rest of its group. The prophets' names expand one way only and live in
+/// [`PROPHETS`].
 ///
 /// Deliberately a short, curated list rather than a general scheme. The misses
 /// worth fixing here are a closed set: this corpus spells one name several
@@ -113,15 +172,33 @@ const ALIASES: &[&[&str]] = &[
     &["uthman", "usman", "othman"],
     &["abdullah", "abdallah"],
     &["khadijah", "khadija"],
-    // Prophets: the Arabic name a reader types against the English name the
-    // translation prints.
+];
+
+/// The prophets, and Maryam: each group lists the Arabic spellings a reader
+/// types and ends with the English name the translations print.
+///
+/// Expansion runs one way. An Arabic spelling reaches its siblings and the
+/// English name; the English name reaches nothing. Narrators carry the
+/// prophets' names, and a reader who types the English one means the prophet
+/// alone. When expansion ran both ways, `ma:"john"` reached `yahya` and
+/// returned 1577 hadith of the Muwatta, nearly every one opening "Yahya
+/// related to me from Malik"; `ad:"david"` returned 757, nearly all for "Abu
+/// Dawud said"; and `moses` reached the narrations of Abu Musa. Across the
+/// hadith collections about nine in ten of the matches the English names made
+/// through an Arabic spelling were a namesake. A reader who types the Arabic
+/// name has asked for whoever bears it.
+///
+/// The cost is a translation that prints the Arabic name for the prophet
+/// himself — "go to Musa", "the fast of Dawud". Tirmidhi's writes *'Eisa*, so
+/// `t:"jesus"` finds nothing there and `t:"eisa"` is the search to make.
+const PROPHETS: &[&[&str]] = &[
     &["ibrahim", "abraham"],
     &["musa", "moses"],
-    &["isa", "jesus"],
+    &["isa", "eisa", "jesus"],
     &["maryam", "mary"],
     &["yusuf", "joseph"],
     &["dawud", "david"],
-    &["sulaiman", "solomon", "suleiman"],
+    &["sulaiman", "suleiman", "solomon"],
     &["nuh", "noah"],
     &["harun", "aaron"],
     &["yahya", "john"],
@@ -148,14 +225,21 @@ const ALIASES: &[&[&str]] = &[
 const STOPWORDS: &str = include_str!("stopwords.txt");
 
 /// Other spellings of `word`, including `word` itself. Empty when there are
-/// none, which is the common case.
+/// none, which is the common case — and for a prophet's English name, which
+/// expands to nothing (see [`PROPHETS`]).
 ///
-/// A linear scan: the table is a few dozen entries and is checked once per
+/// A linear scan: the tables are a few dozen entries and are checked once per
 /// query word.
 pub fn aliases(word: &str) -> &'static [&'static str] {
+    let arabic = |group: &&&[&str]| {
+        group
+            .split_last()
+            .is_some_and(|(_, arabic)| arabic.contains(&word))
+    };
     ALIASES
         .iter()
         .find(|group| group.contains(&word))
+        .or_else(|| PROPHETS.iter().find(arabic))
         .copied()
         .unwrap_or(&[])
 }
@@ -221,11 +305,68 @@ mod tests {
     }
 
     #[test]
-    fn matching_needs_a_pre_folded_needle() {
-        assert!(matches("ٱلْحَمْدُ لِلَّهِ", &fold("الحمد")));
-        assert!(matches("In the name of Allah", &fold("ALLAH")));
-        assert!(!matches("In the name of Allah", &fold("Bukhari")));
-        assert!(!matches("anything", &fold("")));
+    fn a_needle_is_folded_like_the_text() {
+        assert!(Needle::new("الحمد").found_in("ٱلْحَمْدُ لِلَّهِ"));
+        assert!(Needle::new("ALLAH").found_in("In the name of Allah"));
+        assert!(!Needle::new("Bukhari").found_in("In the name of Allah"));
+        assert!(!Needle::new("").found_in("anything"));
+    }
+
+    #[test]
+    fn the_typed_word_is_still_a_substring() {
+        // The documented contract: a fragment finds the words it starts.
+        assert!(Needle::new("mercif").found_in("the Most Merciful"));
+        // Short or not, a reader who types `isa` asked for that substring.
+        assert!(Needle::new("isa").found_in("Abraham and Isaac"));
+    }
+
+    #[test]
+    fn other_spellings_must_stand_as_whole_words() {
+        let eisa = Needle::new("eisa");
+        assert!(eisa.found_in("the Messiah, Jesus, the son of Mary"));
+        assert!(eisa.found_in("'Isa son of Maryam"));
+        assert!(eisa.found_in("‘Eisa bin Maryam"));
+
+        // `isa` inside a longer word is not the name.
+        for text in [
+            "Ishmael and Isaac",
+            "when disaster strikes them",
+            "the book of Isaiah",
+            "they disagreed",
+            "the law of qisas",
+        ] {
+            assert!(!eisa.found_in(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_possessive_or_plural_s_leaves_a_word_whole() {
+        // The apostrophe folds away, leaving `abrahams`.
+        assert!(Needle::new("ibrahim").found_in("Abraham's"));
+        assert!(Needle::new("masjid").found_in("the mosques of Allah"));
+        // One `s`, not any suffix.
+        assert!(!Needle::new("eisa").found_in("Isaac"));
+        assert!(!Needle::new("eisa").found_in("isasa"));
+    }
+
+    #[test]
+    fn an_english_name_does_not_reach_a_namesake() {
+        assert!(!Needle::new("john").found_in("Yahya related to me from Malik"));
+        assert!(!Needle::new("david").found_in("Abu Dawud said:"));
+        assert!(!Needle::new("moses").found_in("Narrated Abu Musa:"));
+        // The Arabic name still reaches the English one.
+        assert!(Needle::new("yahya").found_in("John the Baptist"));
+    }
+
+    #[test]
+    fn letters_of_any_script_join_a_word_and_nothing_else_does() {
+        assert!(contains_word(&fold("قال عيسى"), &fold("عيسى")));
+        assert!(!contains_word(&fold("لعيسى"), &fold("عيسى")));
+        assert!(!contains_word("بisa", "isa"));
+        // Digits and punctuation are boundaries.
+        assert!(contains_word("jesus3 said", "jesus"));
+        assert!(contains_word("(isa)", "isa"));
+        assert!(contains_word("isa", "isa"));
     }
 
     #[test]
@@ -243,10 +384,38 @@ mod tests {
     fn aliases_are_symmetric_and_rare() {
         assert!(aliases("quran").contains(&"koran"));
         assert!(aliases("koran").contains(&"quran"));
-        assert!(aliases("abraham").contains(&"ibrahim"));
         // Ordinary words have none, which is the common path.
         assert!(aliases("mercy").is_empty());
         assert!(aliases("lot").is_empty(), "too collision-prone to alias");
+    }
+
+    #[test]
+    fn a_prophets_name_expands_from_arabic_only() {
+        assert!(aliases("ibrahim").contains(&"abraham"));
+        assert!(aliases("yahya").contains(&"john"));
+        // Sibling Arabic spellings still reach each other.
+        assert!(aliases("eisa").contains(&"isa"));
+        assert!(aliases("suleiman").contains(&"sulaiman"));
+        // Every English name, last in its group, reaches nothing.
+        for group in PROPHETS {
+            let (english, arabic) = group.split_last().unwrap();
+            assert!(!arabic.is_empty(), "{group:?}");
+            assert!(aliases(english).is_empty(), "{english}");
+        }
+    }
+
+    #[test]
+    fn every_spelling_is_folded_and_in_one_group() {
+        // `aliases` stops at the first group holding a word, so a word in two
+        // groups would quietly lose the second.
+        let mut seen = std::collections::HashSet::new();
+        for group in ALIASES.iter().chain(PROPHETS) {
+            assert!(group.len() >= 2, "{group:?}");
+            for word in *group {
+                assert!(seen.insert(*word), "{word} is in two groups");
+                assert_eq!(*word, fold(word), "{word} is not written folded");
+            }
+        }
     }
 
     #[test]

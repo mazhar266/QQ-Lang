@@ -156,6 +156,12 @@ find *Merciful*, and `"pray"` does find *prayer*. It covers `ar` and `en` but
 not metadata, so `"Al-Fatihah"` finds nothing — Surah names are not part of
 the verse text.
 
+The one exception is a word's *other* spellings. A single word is also tried
+under the spellings the [alias table](#spelling-in-english) gives it, and
+those must stand as whole words — `q:"eisa"` looks for `isa` as well, but not
+inside *Isaac* or *disaster*. One trailing `s` is allowed, because folding
+turns *Abraham's* into `abrahams`. The word you typed is still a substring.
+
 The scan is linear over the scope — at 6236 ayat a whole-Quran search takes
 about 100 ms cold, including reading every chapter file, and there is no index
 to fall out of step with the text. Sources that declare no book-wide axis
@@ -683,14 +689,32 @@ The corpus is not even self-consistent — it writes `qur'an` 199 times and `qur
 ```text
 q:"koran"          121 ayat   (the text writes Qur'an)
 q:"ibrahim"         72 ayat   (the translation writes Abraham)
+q:"eisa"            33 ayat   (the translation writes Jesus)
 q:?"quran is easy"  54:17, 54:22, 54:40
 ```
 
 It is about thirty entries — `quran`/`koran`, `muhammad`/`mohammed`, `salah`/`salat`,
-`zakah`/`zakat`, and the prophets under both their Arabic and English names. It is
-deliberately *not* general: expansion happens at query time, so the table can grow
-without rebuilding an index, and words that would collide with ordinary English
-(`lut`/`lot`, `ayyub`/`job`) are left out on purpose.
+`zakah`/`zakat`, and the prophets' Arabic names against the English ones the
+translations print. It is deliberately *not* general: expansion happens at query time,
+so the table can grow without rebuilding an index, and words that would collide with
+ordinary English (`lut`/`lot`, `ayyub`/`job`) are left out on purpose.
+
+**A prophet's name expands one way**, from Arabic to English. `"musa"` finds *Moses*,
+but `"moses"` does not look for `musa`: narrators carry the prophets' names, and a
+reader who types the English one means the prophet alone. When it did expand,
+`ma:"john"` returned 1577 hadith of the Muwatta — nearly every one opens *Yahya related
+to me from Malik* — and `ad:"david"` 757, nearly all for *Abu Dawud said*. The price is
+a hadith translation that prints the Arabic name for the prophet himself: Tirmidhi
+writes *'Eisa*, so `t:"jesus"` finds nothing there. Search `t:"eisa"`, which asks for
+anyone of that name. All three engines read the same table, so this holds for `?"…"`
+and `*"…"` as well.
+
+Exact search matches a substituted spelling only as a whole word. As a substring,
+`isa` sits inside *Isaac*, *Isaiah* and *disaster*, `musa` inside *Musayyab*, and `haj`
+inside *tahajjud*. The cost is the occasional longer word that did belong: `"koran"`
+no longer finds a record that says only *Quranic*. Type `"quran"` for that — your own
+word still matches anywhere. The ranked engines compare whole tokens, so they never
+had the problem.
 
 Errors are still valid JSON, never a malformed string:
 

@@ -717,6 +717,57 @@ fn alternate_spellings_find_the_spelling_the_corpus_uses() {
     assert!(ibrahim.iter().any(|r| r.en.contains("Abraham")));
 }
 
+/// An alternate spelling must stand as a whole word. `eisa` reaches `isa` and
+/// `jesus`, and as a substring `isa` sits inside *Isaac* (2:133) and
+/// *disaster* (2:156) — `q:"jesus"`, when it still expanded, returned 88 ayat
+/// for the 33 that name him.
+#[test]
+fn alternate_spellings_match_whole_words_only() {
+    let mut ctx = ctx!();
+
+    let ayat = |hits: &[qql::Record]| -> Vec<(u64, u64)> {
+        hits.iter()
+            .map(|r| {
+                (
+                    r.extra["surah"].as_u64().unwrap(),
+                    r.extra["ayah"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+
+    // The Quran's English never writes `eisa`; only its other spellings match.
+    let eisa = ayat(&ctx.execute(r#"q:"eisa""#).unwrap());
+    // Isaac, and disaster.
+    for unrelated in [(2, 133), (2, 156)] {
+        assert!(!eisa.contains(&unrelated), "{unrelated:?}");
+    }
+    for named in [(3, 45), (4, 157), (19, 34), (61, 6)] {
+        assert!(eisa.contains(&named), "{named:?} names him");
+    }
+    // Exactly the ayat the translation names him in.
+    assert_eq!(eisa, ayat(&ctx.execute(r#"q:"jesus""#).unwrap()));
+
+    // Judges 13 names Manoah, Samson's father, and never Noah.
+    assert!(ctx.execute(r#"ot:jdg:13:"nuh""#).unwrap().is_empty());
+}
+
+/// A prophet's English name does not expand to the Arabic one, which
+/// narrators share. `ma:"john"` reached `yahya` and returned 1577 hadith of
+/// the Muwatta, nearly every one opening "Yahya related to me from Malik".
+#[test]
+fn a_prophets_english_name_does_not_reach_namesakes() {
+    let mut ctx = ctx!();
+
+    assert!(ctx.execute(r#"ma:"john""#).unwrap().is_empty());
+    assert!(ctx.execute(r#"ma:"yahya""#).unwrap().len() > 1000);
+
+    // The other way round is unchanged: the Quran's English prints *John*.
+    let yahya = ctx.execute(r#"q:"yahya""#).unwrap();
+    assert!(!yahya.is_empty());
+    assert!(yahya.iter().all(|r| r.en.contains("John")));
+}
+
 /// Apostrophes are folded away, so the four spellings the corpus uses for one
 /// name are one token — and a reader who types none of them still matches.
 #[test]
