@@ -1,0 +1,18 @@
+# moon workspace (https://moonrepo.dev — docs/config/workspace).
+#
+# This is a single-project repo: the qql crate at the root is the one moon
+# project (see moon.yml beside it). moon itself comes from .mise.toml, so
+# `mise install` is all a fresh checkout needs before `moon run <task>`.
+#
+# v2 config format — older moon versions will refuse it.
+
+projects:
+  root: '.'
+
+# Fall back to the root project so bare `moon run test` works.
+defaultProject: 'qql'
+
+vcs:
+  client: 'git'
+  defaultBranch: 'main'
+  provider: 'github'

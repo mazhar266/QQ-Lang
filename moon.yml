@@ -1,0 +1,153 @@
+# moon project config for the qql crate.
+#
+# Tasks mirror the checks CONTRIBUTING.md asks for and the jobs CI runs
+# (.github/workflows/ci.yml), so locally `moon run lint` is the same command
+# CI executes. Toolchains come from .mise.toml — moon deliberately pins no
+# rust version and uses whatever rustup/cargo provide.
+#
+# Nightly tasks (miri, fuzz*) need the opt-in nightly toolchain documented in
+# .mise.toml. The dart binding's checks stay in CI; moon here covers the Rust
+# crate.
+
+id: 'qql'
+language: 'rust'
+stack: 'systems'
+layer: 'library'
+
+fileGroups:
+  # Everything cargo compiles. `examples` counts because clippy --all-targets
+  # lints them too.
+  sources:
+    - 'src/**/*'
+    - 'examples/**/*'
+    - 'Cargo.toml'
+  tests:
+    - 'tests/**/*'
+  # The committed datasets tests resolve against — a data fix should re-run
+  # tests even when no Rust file changed.
+  data:
+    - 'sources/**/*'
+
+tasks:
+  check:
+    command: 'cargo'
+    args: ['check']
+    inputs:
+      - '@group(sources)'
+      - '/Cargo.lock'
+
+  build:
+    command: 'cargo'
+    args: ['build']
+    inputs:
+      - '@group(sources)'
+      - '/Cargo.lock'
+
+  build-features:
+    # The native library the Dart binding links (ci.yml, "dart" job).
+    command: 'cargo'
+    args: ['build', '--release', '--features', 'vector,fulltext']
+    inputs:
+      - '@group(sources)'
+      - '/Cargo.lock'
+
+  format:
+    command: 'cargo'
+    args: ['fmt', '--all']
+    options:
+      cache: false # mutates files; never skip
+
+  format-check:
+    command: 'cargo'
+    args: ['fmt', '--check']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+
+  lint:
+    command: 'cargo'
+    args: ['clippy', '--all-targets', '--', '-D', 'warnings']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '/Cargo.lock'
+
+  lint-features:
+    # Both features at once supersedes CI's separate vector/fulltext clippy
+    # jobs.
+    command: 'cargo'
+    args: ['clippy', '--features', 'vector,fulltext', '--all-targets', '--', '-D', 'warnings']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '/Cargo.lock'
+
+  test:
+    command: 'cargo'
+    args: ['test']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(data)'
+      - '/Cargo.lock'
+
+  test-vector:
+    command: 'cargo'
+    args: ['test', '--features', 'vector']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(data)'
+      - '/Cargo.lock'
+
+  test-fulltext:
+    command: 'cargo'
+    args: ['test', '--features', 'fulltext']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(data)'
+      - '/Cargo.lock'
+
+  smoke:
+    # scripts/c-smoke.sh needs a POSIX cc and libqql.a, so it stays unix-only.
+    command: 'bash'
+    args: ['scripts/c-smoke.sh']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - 'include/**/*'
+    options:
+      cache: false
+      os: ['linux', 'macos']
+
+  miri:
+    # Needs `rustup toolchain install nightly --profile minimal --component
+    # miri` (see .mise.toml). Miri cannot run the filesystem-backed resolver
+    # tests, hence --test ffi only.
+    command: 'cargo'
+    args: ['+nightly', 'miri', 'test', '--test', 'ffi']
+    env:
+      MIRIFLAGS: '-Zmiri-disable-isolation'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    options:
+      cache: false
+
+  fuzz-parse:
+    # Needs nightly + `cargo install cargo-fuzz`. Short smoke run, like CI.
+    command: 'cargo'
+    args: ['+nightly', 'fuzz', 'run', 'parse', '--', '-max_total_time=60']
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false
+
+  fuzz-ffi:
+    command: 'cargo'
+    args: ['+nightly', 'fuzz', 'run', 'ffi', '--', '-max_total_time=60']
+    inputs:
+      - '@group(sources)'
+    options:
+      cache: false

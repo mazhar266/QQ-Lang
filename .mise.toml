@@ -1,0 +1,25 @@
+# Toolchains for QQ-Lang, managed by mise (https://mise.jdx.dev). After
+# cloning, run `mise install` — or just enter the repo with mise activated
+# and it sets everything up on first use.
+
+[tools]
+# Latest stable Rust, matching CI (dtolnay/rust-toolchain@stable), with what
+# `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` need.
+# The crate's MSRV is 1.75 (Cargo.toml); check it with
+#   mise x rust@1.75 -- cargo check
+# mise installs Rust through rustup, so the nightly-only checks from
+# CONTRIBUTING.md still work once you opt in:
+#   rustup toolchain install nightly --profile minimal --component rust-src,miri
+#   cargo +nightly miri test --test ffi
+#   cargo +nightly fuzz run parse          # after: cargo install cargo-fuzz
+rust = { version = "stable", profile = "minimal", components = ["rustfmt", "clippy"] }
+
+# scripts/*.py are stdlib-only Python 3; this guarantees a real interpreter
+# instead of whatever `python` on the PATH happens to be (on Windows, often
+# the Microsoft Store alias stub).
+python = "3.13"
+
+# Task runner (https://moonrepo.dev); the tasks in moon.yml wrap the checks
+# from CONTRIBUTING.md and CI. moon.yml requires this exact major (v2 config
+# format).
+"aqua:moonrepo/moon" = "2.6.5"

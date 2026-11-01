@@ -30,7 +30,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-All three must be clean. If you touched `src/ffi.rs`:
+All three must be clean. The same checks are wired up as moon tasks — `moon run format-check lint test` (moon and the toolchains come from mise; see [moon.yml](moon.yml) and [.mise.toml](.mise.toml), plus `test-vector`, `test-fulltext`, `smoke`, and the nightly `miri`/`fuzz-*` tasks). If you touched `src/ffi.rs`:
 
 ```bash
 cargo +nightly miri test --test ffi

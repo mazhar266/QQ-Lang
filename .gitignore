@@ -1,5 +1,8 @@
 /target
 
+# moon runner cache (moon.yml, .moon/workspace.yml)
+/.moon/cache
+
 # Fuzzing — build output and generated corpora, not source
 /fuzz/target
 /fuzz/corpus
