@@ -57,6 +57,12 @@ pub trait Source: Send + Sync {
     /// Display name, e.g. `"Quran"`.
     fn name(&self) -> &str;
 
+    /// Record metadata keys for the primary and item numbers in a citation.
+    /// For book-wide numbering, a `number` item is already the full locator.
+    fn citation_keys(&self) -> (&str, &str) {
+        ("chapter", "number")
+    }
+
     /// Alternate codes that also select this source.
     ///
     /// Returns owned references rather than a `&'static` slice so that

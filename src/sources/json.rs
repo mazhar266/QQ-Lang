@@ -168,6 +168,10 @@ fn text(value: &Value, path: &str) -> String {
 }
 
 impl Source for JsonSource {
+    fn citation_keys(&self) -> (&str, &str) {
+        (self.primary_key(), "number")
+    }
+
     fn code(&self) -> &str {
         &self.spec.code
     }

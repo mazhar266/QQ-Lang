@@ -597,6 +597,10 @@ fn not_found(detail: String) -> Error {
 }
 
 impl Source for Bible {
+    fn citation_keys(&self) -> (&str, &str) {
+        ("chapter", "verse")
+    }
+
     fn code(&self) -> &str {
         self.code
     }

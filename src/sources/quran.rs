@@ -83,6 +83,10 @@ struct Verse {
 }
 
 impl Source for Quran {
+    fn citation_keys(&self) -> (&str, &str) {
+        ("surah", "ayah")
+    }
+
     fn code(&self) -> &str {
         "Q"
     }

@@ -591,9 +591,20 @@ cargo run --bin qql -- "Q:2:255"
 | `--source <F>` | Register sources from a manifest, relative to `--data`. Repeatable. |
 | `--parse` | Print the parsed query instead of resolving it |
 | `--compact` | Compact JSON instead of pretty-printed |
+| `--cite[=STYLE]` | Print each resolved passage with its citation. Use `--cite` for plain text, or select `apa`, `chicago`, `arabic`, or `markdown`. |
 | `--sources` | List registered source codes |
 
-Output is pretty-printed JSON, exit code `0` on success and `1` on error — the JSON goes to stdout either way, so it stays pipeable into `jq`. The library itself returns compact JSON.
+The CLI prints pretty-printed JSON by default and exits with `0` on success or `1` on error. Resolution errors and `--parse` output use JSON even with `--cite`. The library itself returns compact JSON.
+
+```bash
+qql 26:193 --cite           # The Trustworthy Spirit has brought it down — Quran 26:193
+qql 26:193 --cite=apa       # “The Trustworthy Spirit has brought it down” (Quran, n.d., 26:193).
+qql 26:193 --cite=chicago   # “The Trustworthy Spirit has brought it down” (Quran 26:193).
+qql 26:193 --cite=arabic    # ﴿نَزَلَ بِهِ ٱلرُّوحُ ٱلْأَمِينُ﴾ [الشعراء ٢٦:١٩٣]
+qql 26:193 --cite=markdown  # Markdown blockquote followed by the reference
+```
+
+Ranges and searches print one citation per result in query order. Arabic style uses the stored Arabic text. The other styles use the English translation. If the requested text is empty, the CLI uses the available language. The APA and Chicago styles produce in-text citations. APA uses `n.d.` because records do not specify an edition date.
 
 ## Rust usage
 

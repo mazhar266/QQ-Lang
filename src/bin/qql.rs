@@ -11,6 +11,10 @@
 
 use std::process::ExitCode;
 
+#[path = "qql/citation.rs"]
+mod citation;
+use citation::Style;
+
 const USAGE: &str = "\
 qql — Quran Query Language
 
@@ -23,11 +27,15 @@ OPTIONS:
                    Repeatable. <DIR>/qql-sources.json loads automatically.
     --parse        Print the parsed query instead of resolving it
     --compact      Emit compact JSON instead of pretty-printed
+    --cite[=STYLE] Print each resolved passage as a quotation and reference.
+                   Default: plain. Styles: apa, chicago, arabic, markdown.
     --sources      List registered source codes
     -h, --help     Show this help
     -V, --version  Show version
 
 EXAMPLES:
+    qql 26:193 --cite
+    qql 26:193 --cite=arabic
     qql \"Q:2:255\"
     qql \"Q:2:1-5,255;Q:1;\"
     qql --data ./sources \"B:1:1-3\"
@@ -38,6 +46,7 @@ fn main() -> ExitCode {
     let mut data = String::from("./sources");
     let mut parse_only = false;
     let mut compact = false;
+    let mut citation = None;
     let mut manifests: Vec<String> = Vec::new();
     let mut query: Option<String> = None;
 
@@ -69,6 +78,15 @@ fn main() -> ExitCode {
             }
             "--parse" => parse_only = true,
             "--compact" => compact = true,
+            "--cite" => citation = Some(Style::Plain),
+            other if other.starts_with("--cite=") => {
+                let name = &other["--cite=".len()..];
+                let Some(style) = Style::named(name) else {
+                    eprintln!("error: unknown citation style '{name}' (use --cite, or --cite=apa|chicago|arabic|markdown)");
+                    return ExitCode::FAILURE;
+                };
+                citation = Some(style);
+            }
             "--source" => match args.next() {
                 Some(path) => manifests.push(path),
                 None => {
@@ -131,9 +149,25 @@ fn main() -> ExitCode {
                 break;
             }
         }
-        match failed {
-            Some(error) => error,
-            None => ctx.execute_value(&query),
+        match (failed, citation) {
+            (Some(error), _) => error,
+            (None, Some(style)) => match ctx.execute(&query) {
+                Ok(records) => {
+                    for (i, record) in records.iter().enumerate() {
+                        if i > 0 {
+                            println!();
+                        }
+                        let source = ctx
+                            .registry_mut()
+                            .get(&record.source)
+                            .expect("resolved record belongs to a registered source");
+                        println!("{}", style.render(record, source));
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                Err(e) => e.to_json(&query),
+            },
+            (None, None) => ctx.execute_value(&query),
         }
     };
 

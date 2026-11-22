@@ -87,6 +87,10 @@ struct Verse {
 }
 
 impl Source for Psalms {
+    fn citation_keys(&self) -> (&str, &str) {
+        ("psalm", "verse")
+    }
+
     fn code(&self) -> &str {
         "PS"
     }
