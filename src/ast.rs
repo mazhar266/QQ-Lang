@@ -64,6 +64,10 @@ pub struct Reference {
     ///
     /// For a search this is the `3~5` scope rather than a selection.
     pub ranges: Vec<Range>,
+    /// Flat selectors when any endpoint has a letter suffix. Includes every
+    /// selector of that reference, in written order, in place of `ranges`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lettered_ranges: Vec<(crate::NumberLabel, crate::NumberLabel)>,
     /// Search, for `Q:1:"text"` or `Q:1:*"text"`. `None` is an ordinary
     /// reference.
     ///
@@ -121,7 +125,7 @@ pub struct Query {
 impl Reference {
     /// Whether this reference selects everything under `primary`.
     pub fn selects_all(&self) -> bool {
-        self.ranges.is_empty()
+        self.ranges.is_empty() && self.lettered_ranges.is_empty()
     }
 
     /// Whether the primary was skipped — the `B::100` form.
@@ -160,6 +164,11 @@ impl Reference {
     ///
     /// An empty selector yields `1..=max`.
     pub fn expand(&self, max: u32) -> Result<Vec<u32>, Error> {
+        if !self.lettered_ranges.is_empty() {
+            return Err(Error::ReferenceNotFound {
+                detail: format!("{} requires a lettered numbering map", self.label()),
+            });
+        }
         if self.selects_all() {
             return Ok((1..=max).collect());
         }
@@ -201,6 +210,7 @@ mod tests {
             source: Some("Q".into()),
             path: Vec::new(),
             primary: Some(2),
+            lettered_ranges: Vec::new(),
             search: None,
             ranges: ranges
                 .iter()

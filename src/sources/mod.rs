@@ -117,6 +117,23 @@ pub trait Source: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Resolve an explicit flat reference with an optional edition choice.
+    /// Sources without alternate numbering retain their ordinary numeric lookup.
+    fn resolve_numbered(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        _numbering: crate::Numbering,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        if !reference.lettered_ranges.is_empty() {
+            return Err(Error::ReferenceNotFound {
+                detail: format!("{} has no lettered references", self.code()),
+            });
+        }
+        self.resolve(repo, reference, out)
+    }
+
     /// Validate, load, and append records — in the order the query asked for.
     ///
     /// Semantic validation lives here rather than in a separate `validate`

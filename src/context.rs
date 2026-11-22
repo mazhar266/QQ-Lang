@@ -21,6 +21,7 @@ pub struct Context {
     repo: Repository,
     registry: Registry,
     manifest_loaded: bool,
+    numbering: Option<crate::Numbering>,
 }
 
 /// Manifest of user-defined sources, read from the data directory if present.
@@ -35,7 +36,14 @@ impl Context {
             repo: Repository::new(data_dir),
             registry: Registry::with_defaults(),
             manifest_loaded: false,
+            numbering: None,
         }
+    }
+
+    /// Select a numbering scheme for explicit flat lookups on supported sources.
+    /// Passing `None` restores the default canonical numbering.
+    pub fn set_numbering(&mut self, numbering: Option<crate::Numbering>) {
+        self.numbering = numbering;
     }
 
     /// The data directory this context reads from.
@@ -117,7 +125,7 @@ impl Context {
     /// References resolve in the order written and are never reordered or
     /// deduplicated against each other — `Q:2:255;Q:2:255;` yields two records.
     pub fn execute(&mut self, query: &str) -> Result<Vec<Record>, Error> {
-        let parsed: Query = match crate::parser::parse_tracked(query) {
+        let parsed: Query = match crate::parser::parse_tracked(query, self.numbering) {
             Ok(parsed) => parsed,
             Err((error, names)) => return Err(self.first_syntax_error(&names, error)),
         };
@@ -175,7 +183,12 @@ impl Context {
                         Self::full_text(&mut self.repo, source, reference, search, &mut records)?
                     }
                 },
-                None => source.resolve(&mut self.repo, reference, &mut records)?,
+                None => match self.numbering {
+                    Some(scheme) if reference.is_flat() => {
+                        source.resolve_numbered(&mut self.repo, reference, scheme, &mut records)?
+                    }
+                    _ => source.resolve(&mut self.repo, reference, &mut records)?,
+                },
             }
         }
 
@@ -356,6 +369,7 @@ impl Context {
                 source: reference.source.clone(),
                 path: Vec::new(),
                 primary,
+                lettered_ranges: Vec::new(),
                 ranges: vec![Range {
                     from: number,
                     to: number,

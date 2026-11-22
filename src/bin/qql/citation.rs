@@ -77,7 +77,15 @@ impl Style {
 fn locator(record: &Record, primary_key: &str, item_key: &str) -> String {
     let number = |key: &str| record.extra.get(key).and_then(|v| v.as_u64());
     let flat = item_key == "number"
-        && record.extra.get("numbering").and_then(|v| v.as_str()) == Some("book");
+        && matches!(
+            record.extra.get("numbering").and_then(|v| v.as_str()),
+            Some("book" | "traditional" | "sunnah")
+        );
+    if flat {
+        if let Some(label) = record.extra.get(item_key).and_then(|v| v.as_str()) {
+            return label.to_owned();
+        }
+    }
     match (number(primary_key), number(item_key)) {
         (Some(primary), Some(item)) if !flat => format!("{primary}:{item}"),
         (_, Some(item)) => item.to_string(),

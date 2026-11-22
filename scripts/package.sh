@@ -40,7 +40,7 @@ cp -r sources/hisnul-muslim "$out/sources/"
 cp -r sources/psalms "$out/sources/"
 cp -r sources/bible sources/torah "$out/sources/"
 # Canonical citation-number maps: what B::6403 resolves through.
-cp -r sources/canonical "$out/sources/"
+cp -r sources/numbering sources/canonical "$out/sources/"
 cp -r sources/vectors "$out/sources/"
 cp -r sources/fulltext "$out/sources/"
 # Tantivy lock files are runtime artifacts, recreated on demand.
@@ -54,6 +54,7 @@ cp LICENSE.md README.md "$out/"
     bin=./qql; [ -f qql.exe ] && bin=./qql.exe
     "$bin" --compact 'Q:1:1'           | grep -q '"ok":true'
     "$bin" --compact 'b::6403'         | grep -q '"chapter":80'
+    "$bin" --compact --numbering=sunnah 'm::162a' | grep -q '"number":"162a"'
     "$bin" --compact 'b::100'          | grep -q '"numbering":"book"'
     "$bin" --compact 'q:1:?"mercy"~1'  | grep -q '"ranked":true'
     "$bin" --compact 'q:1:*"worship"'  | grep -q '"ranked":true'

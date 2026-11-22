@@ -49,6 +49,7 @@ pub mod ffi;
 #[cfg(feature = "fulltext")]
 pub mod fulltext;
 mod lexer;
+mod numbering;
 mod parser;
 mod record;
 mod registry;
@@ -61,7 +62,8 @@ pub mod vector;
 pub use ast::{MatchKind, Query, Range, Reference, Search, Segment};
 pub use context::Context;
 pub use error::Error;
-pub use parser::parse;
+pub use numbering::{NumberLabel, Numbering};
+pub use parser::{parse, parse_with_numbering};
 pub use record::Record;
 pub use registry::Registry;
 pub use repo::Repository;

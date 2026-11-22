@@ -6,7 +6,8 @@
 The dataset under sources/hadith numbers hadiths by its own insertion
 order, which drifts from the numbering the world actually cites ('Abd al-Baqi
 for Bukhari, Dar-us-Salam for Muslim, the sunnah.com reference numbers for the
-rest). This script fetches fawazahmed0/hadith-api — public domain, carries the
+rest). Bukhari uses the text-verified labels in sources/numbering/B.json,
+including each number printed on a shared narration. For other books this script fetches fawazahmed0/hadith-api — public domain, carries the
 canonical number *and* an in-book (book, hadith) reference per entry — and
 emits one committed map per collection:
 
@@ -51,7 +52,6 @@ CDN = 'https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/ara-{book}.
 # ash-Shama'il — have no citation numbering to map, and are registered with
 # `HadithCollection::chaptered` so `CODE::N` is refused rather than guessed.
 BOOKS = [
-    ('bukhari', 'bukhari', 'B'),
     ('muslim', 'muslim', 'M'),
     ('abudawud', 'abudawud', 'AD'),
     ('tirmidhi', 'tirmidhi', 'T'),
@@ -82,6 +82,33 @@ def chapter_sizes(book):
             with open(os.path.join(directory, name), encoding='utf-8') as f:
                 sizes[int(name[:-5])] = len(json.load(f)['hadiths'])
     return sizes
+
+
+def write_map(code, mapping):
+    path = os.path.join(OUT, f'{code}.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(mapping, f, separators=(',', ':'), sort_keys=True)
+    return path
+
+
+def build_bukhari():
+    with open(os.path.join(ROOT, 'sources/numbering/B.json'), encoding='utf-8') as f:
+        chapters = json.load(f)
+    mapping = {}
+    sizes = chapter_sizes('bukhari')
+    for chapter, entries in chapters:
+        chapter = int(chapter)
+        if sizes.get(chapter) != len(entries):
+            raise ValueError(f'Bukhari chapter {chapter} differs from the verified edition')
+        for item, labels in enumerate(entries, 1):
+            for number in labels.split(','):
+                if number.isdecimal():
+                    if number in mapping:
+                        raise ValueError(f'duplicate Bukhari citation {number}')
+                    mapping[number] = [chapter, item]
+    if set(mapping) != {str(n) for n in range(1, 7564)}:
+        raise ValueError('expected every unsuffixed Bukhari citation from 1 through 7563')
+    print(f'  B: {len(mapping)} canonical numbers  {write_map("B", mapping)}')
 
 
 def build(edition, book, code, cache):
@@ -130,10 +157,7 @@ def build(edition, book, code, cache):
             f'expected [1, 1] — the upstream numbering looks shifted, refusing'
         )
 
-    path = os.path.join(OUT, f'{code}.json')
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(mapping, f, separators=(',', ':'), sort_keys=True)
-
+    path = write_map(code, mapping)
     top = max(int(k) for k in mapping)
     print(f'{code:>3}: {len(mapping):5d} canonical numbers, 1..{top}  '
           f'(skipped: {skipped_front} front matter, {skipped_variant} variants, '
@@ -147,6 +171,7 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
+    build_bukhari()
     for edition, book, code in BOOKS:
         build(edition, book, code, args.cache)
     return 0

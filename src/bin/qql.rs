@@ -26,6 +26,7 @@ OPTIONS:
     --source <F>   Register sources from a manifest, relative to --data.
                    Repeatable. <DIR>/qql-sources.json loads automatically.
     --parse        Print the parsed query instead of resolving it
+    --numbering=SCHEME  Interpret flat hadith references as traditional, book or sunnah.
     --compact      Emit compact JSON instead of pretty-printed
     --cite[=STYLE] Print each resolved passage as a quotation and reference.
                    Default: plain. Styles: apa, chicago, arabic, markdown.
@@ -47,6 +48,7 @@ fn main() -> ExitCode {
     let mut parse_only = false;
     let mut compact = false;
     let mut citation = None;
+    let mut numbering = None;
     let mut manifests: Vec<String> = Vec::new();
     let mut query: Option<String> = None;
 
@@ -78,6 +80,19 @@ fn main() -> ExitCode {
             }
             "--parse" => parse_only = true,
             "--compact" => compact = true,
+            other if other.starts_with("--numbering=") => {
+                numbering = Some(match &other["--numbering=".len()..] {
+                    "traditional" => qql::Numbering::Traditional,
+                    "book" => qql::Numbering::Book,
+                    "sunnah" => qql::Numbering::Sunnah,
+                    name => {
+                        eprintln!(
+                            "error: unknown numbering '{name}' (use traditional, book or sunnah)"
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                });
+            }
             "--cite" => citation = Some(Style::Plain),
             other if other.starts_with("--cite=") => {
                 let name = &other["--cite=".len()..];
@@ -115,7 +130,7 @@ fn main() -> ExitCode {
     };
 
     let value = if parse_only {
-        match qql::parse(&query) {
+        match qql::parse_with_numbering(&query, numbering) {
             Ok(parsed) => serde_json::json!({
                 "ok": true,
                 "query": query,
@@ -129,6 +144,10 @@ fn main() -> ExitCode {
                             .collect::<Vec<_>>(),
                         "search": r.search,
                     });
+                    if !r.lettered_ranges.is_empty() {
+                        reference["ranges"] = r.lettered_ranges.iter().map(|(from,to)|
+                            [from.to_string(), to.to_string()]).collect::<Vec<_>>().into();
+                    }
                     // Only a query that names a book has a path, so every
                     // other query prints exactly what it always did.
                     if !r.path.is_empty() {
@@ -142,6 +161,7 @@ fn main() -> ExitCode {
         }
     } else {
         let mut ctx = qql::Context::new(&data);
+        ctx.set_numbering(numbering);
         let mut failed = None;
         for manifest in &manifests {
             if let Err(e) = ctx.add_sources_from(manifest) {

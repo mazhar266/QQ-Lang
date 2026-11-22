@@ -41,7 +41,9 @@
 //! only; see that constructor for why inventing one would be worse than
 //! refusing.
 
-use crate::ast::{Range, Reference};
+mod numbering;
+
+use crate::ast::Reference;
 use crate::error::Error;
 use crate::record::Record;
 use crate::repo::Repository;
@@ -99,6 +101,49 @@ impl HadithCollection {
             name,
             dir,
             numbered: false,
+        }
+    }
+}
+
+/// File names and record metadata differ for the two separately filed sections.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(try_from = "String")]
+enum ChapterId {
+    Number(u32),
+    Introduction,
+    Nasai35b,
+}
+
+impl TryFrom<String> for ChapterId {
+    type Error = String;
+    fn try_from(key: String) -> Result<Self, String> {
+        match key.as_str() {
+            "introduction" => Ok(Self::Introduction),
+            "35b" => Ok(Self::Nasai35b),
+            _ => key
+                .parse::<u32>()
+                .map(Self::Number)
+                .map_err(|_| format!("invalid chapter {key}")),
+        }
+    }
+}
+
+impl std::fmt::Display for ChapterId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Introduction => f.write_str("introduction"),
+            Self::Nasai35b => f.write_str("35b"),
+        }
+    }
+}
+
+impl From<ChapterId> for serde_json::Value {
+    fn from(id: ChapterId) -> Self {
+        match id {
+            ChapterId::Number(n) => n.into(),
+            ChapterId::Introduction => 0.into(),
+            ChapterId::Nasai35b => "35b".into(),
         }
     }
 }
@@ -168,65 +213,95 @@ impl Source for HadithCollection {
             });
         }
 
+        let chapter_id = ChapterId::Number(chapter_id);
+        let chapter = self.chapter(repo, chapter_id)?;
+        let total = u32::try_from(chapter.hadiths.len()).map_err(|_| Error::InvalidDataFile {
+            path: format!("{DIR}/{}/{chapter_id}.json", self.dir),
+            detail: "implausible hadith count".into(),
+        })?;
+        for number in reference.expand(total)? {
+            out.push(self.record(&chapter, chapter_id, number)?);
+        }
+        Ok(())
+    }
+
+    fn resolve_numbered(
+        &self,
+        repo: &mut Repository,
+        reference: &Reference,
+        numbering: crate::Numbering,
+        out: &mut Vec<Record>,
+    ) -> Result<(), Error> {
+        if matches!(self.code, "B" | "M" | "AD" | "T" | "N" | "IM") && self.numbered {
+            return self.resolve_edition(repo, reference, numbering, out);
+        }
+        if !reference.lettered_ranges.is_empty() {
+            return Err(Error::ReferenceNotFound {
+                detail: format!("{} has no lettered references", self.code),
+            });
+        }
+        self.resolve(repo, reference, out)
+    }
+}
+
+impl HadithCollection {
+    fn chapter(
+        &self,
+        repo: &mut Repository,
+        chapter_id: ChapterId,
+    ) -> Result<Arc<ChapterFile>, Error> {
         let relative = format!("{DIR}/{}/{chapter_id}.json", self.dir);
         // A chapter past the end of the collection shows up as a missing file.
         // Translate it into a semantic error rather than leaking storage
         // layout to the caller.
-        let file: std::sync::Arc<ChapterFile> = match repo.load(&relative) {
-            Ok(file) => file,
-            Err(Error::DataFileNotFound { .. }) => {
-                return Err(Error::ReferenceNotFound {
-                    detail: format!("{}:{chapter_id} (no such chapter)", self.code),
-                })
-            }
-            Err(other) => return Err(other),
-        };
+        match repo.load(&relative) {
+            Err(Error::DataFileNotFound { .. }) => Err(Error::ReferenceNotFound {
+                detail: format!("{}:{chapter_id} (no such chapter)", self.code),
+            }),
+            result => result,
+        }
+    }
 
-        let total = u32::try_from(file.hadiths.len()).map_err(|_| Error::InvalidDataFile {
-            path: relative.clone(),
-            detail: "implausible hadith count".into(),
-        })?;
-
+    fn record(
+        &self,
+        file: &ChapterFile,
+        chapter_id: ChapterId,
+        number: u32,
+    ) -> Result<Record, Error> {
         let (chapter_ar, chapter_en) = match &file.chapter {
             Some(info) => (info.arabic.as_str(), info.english.as_str()),
             None => ("", ""),
         };
 
-        for number in reference.expand(total)? {
-            let hadith = file
-                .hadiths
-                .iter()
-                .find(|h| h.id == number)
-                .ok_or_else(|| Error::ReferenceNotFound {
-                    detail: format!("{}:{chapter_id}:{number}", self.code),
-                })?;
+        let hadith = file
+            .hadiths
+            .iter()
+            .find(|h| h.id == number)
+            .ok_or_else(|| Error::ReferenceNotFound {
+                detail: format!("{}:{chapter_id}:{number}", self.code),
+            })?;
 
-            out.push(Record {
-                source: self.code.to_string(),
-                collection: self.name.to_string(),
-                extra: [
-                    ("chapter".to_string(), chapter_id.into()),
-                    ("chapter_name_ar".to_string(), chapter_ar.into()),
-                    ("chapter_name_en".to_string(), chapter_en.into()),
-                    ("number".to_string(), number.into()),
-                    (
-                        "narrator".to_string(),
-                        hadith.english.narrator.clone().into(),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-                emlaei: String::new(),
-                ar: hadith.arabic.clone(),
-                en: hadith.english.text.clone(),
-            });
-        }
-
-        Ok(())
+        Ok(Record {
+            source: self.code.to_string(),
+            collection: self.name.to_string(),
+            extra: [
+                ("chapter".to_string(), chapter_id.into()),
+                ("chapter_name_ar".to_string(), chapter_ar.into()),
+                ("chapter_name_en".to_string(), chapter_en.into()),
+                ("number".to_string(), number.into()),
+                (
+                    "narrator".to_string(),
+                    hadith.english.narrator.clone().into(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            emlaei: String::new(),
+            ar: hadith.arabic.clone(),
+            en: hadith.english.text.clone(),
+        })
     }
-}
 
-impl HadithCollection {
     /// The committed canonical-number map for this collection:
     /// canonical citation number → `(chapter, item)`.
     fn canonical(&self, repo: &mut Repository) -> Result<Arc<CanonicalMap>, Error> {
@@ -276,6 +351,7 @@ impl HadithCollection {
             .map(|r| r.from)
             .collect();
 
+        let mut seen = HashSet::new();
         for number in reference.expand(total)? {
             let Some(&(chapter, item)) = map.get(number.to_string().as_str()) else {
                 if singles.contains(&number) {
@@ -290,27 +366,22 @@ impl HadithCollection {
                 continue;
             };
 
-            let mut found = Vec::new();
-            self.resolve(
-                repo,
-                &Reference {
-                    source: reference.source.clone(),
-                    path: Vec::new(),
-                    primary: Some(chapter),
-                    ranges: vec![Range {
-                        from: item,
-                        to: item,
-                    }],
-                    search: None,
-                },
-                &mut found,
-            )?;
-
-            for mut record in found {
-                record.extra.insert("number".to_string(), number.into());
-                record.extra.insert("numbering".to_string(), "book".into());
-                out.push(record);
+            // Bukhari can print several numbers on one narration. Keep the
+            // first requested label when a selection contains multiple aliases.
+            if self.code == "B" && !seen.insert((chapter, item)) {
+                continue;
             }
+            if chapter == 0 {
+                return Err(Error::ReferenceNotFound {
+                    detail: format!("{}:0 (chapters start at 1)", self.code),
+                });
+            }
+            let chapter = ChapterId::Number(chapter);
+            let file = self.chapter(repo, chapter)?;
+            let mut record = self.record(&file, chapter, item)?;
+            record.extra.insert("number".into(), number.into());
+            record.extra.insert("numbering".into(), "book".into());
+            out.push(record);
         }
 
         Ok(())

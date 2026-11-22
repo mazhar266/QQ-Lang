@@ -64,7 +64,15 @@ use crate::lexer::{tokenize, Kind, Token};
 
 /// Parse a query. Touches no files.
 pub fn parse(input: &str) -> Result<Query, Error> {
-    parse_tracked(input).map_err(|(error, _)| error)
+    parse_with_numbering(input, None)
+}
+
+/// Parse with the lettered flat selectors used by Sunnah.com numbering.
+pub fn parse_with_numbering(
+    input: &str,
+    numbering: Option<crate::Numbering>,
+) -> Result<Query, Error> {
+    parse_tracked(input, numbering).map_err(|(error, _)| error)
 }
 
 /// The first name of each path, with the code it followed.
@@ -76,7 +84,10 @@ pub(crate) type Names = Vec<(String, Segment)>;
 /// a later error stops the parse, [`Context`](crate::Context) needs the names
 /// seen up to it: one on a source that takes none is the error the query has
 /// always reported, since the old parser stopped there first.
-pub(crate) fn parse_tracked(input: &str) -> Result<Query, (Error, Names)> {
+pub(crate) fn parse_tracked(
+    input: &str,
+    numbering: Option<crate::Numbering>,
+) -> Result<Query, (Error, Names)> {
     if input.trim().is_empty() {
         return Err((Error::EmptyQuery, Vec::new()));
     }
@@ -85,6 +96,7 @@ pub(crate) fn parse_tracked(input: &str) -> Result<Query, (Error, Names)> {
     let mut parser = Parser {
         tokens,
         index: 0,
+        letters: numbering == Some(crate::Numbering::Sunnah),
         names: Vec::new(),
     };
     parser.query().map_err(|error| (error, parser.names))
@@ -93,6 +105,7 @@ pub(crate) fn parse_tracked(input: &str) -> Result<Query, (Error, Names)> {
 struct Parser<'a> {
     tokens: Vec<Token<'a>>,
     index: usize,
+    letters: bool,
     /// The first name of every path begun so far, with its code.
     names: Names,
 }
@@ -208,6 +221,7 @@ impl<'a> Parser<'a> {
                     path,
                     primary: None,
                     ranges: Vec::new(),
+                    lettered_ranges: Vec::new(),
                     search: None,
                 }]);
             }
@@ -233,11 +247,34 @@ impl<'a> Parser<'a> {
         // right here can be followed by that colon, so `Q:` and `Q::` stay the
         // errors they were rather than quietly becoming "the whole collection".
         if explicit && self.eat(Kind::Colon) {
+            let (ranges, lettered_ranges) = if self.letters {
+                let labels = self.list(Self::label_range)?;
+                if labels
+                    .iter()
+                    .any(|(a, b)| !a.suffix.is_empty() || !b.suffix.is_empty())
+                {
+                    (Vec::new(), labels)
+                } else {
+                    (
+                        labels
+                            .into_iter()
+                            .map(|(a, b)| Range {
+                                from: a.number,
+                                to: b.number,
+                            })
+                            .collect(),
+                        Vec::new(),
+                    )
+                }
+            } else {
+                (self.selector()?, Vec::new())
+            };
             references.push(Reference {
                 source: source.clone(),
                 path: path.clone(),
                 primary: None,
-                ranges: self.selector()?,
+                ranges,
+                lettered_ranges,
                 search: None,
             });
             if !self.eat(Kind::Comma) {
@@ -282,6 +319,7 @@ impl<'a> Parser<'a> {
                 source: source.clone(),
                 path: path.clone(),
                 primary: Some(primary),
+                lettered_ranges: Vec::new(),
                 ranges,
                 search: None,
             });
@@ -368,6 +406,7 @@ impl<'a> Parser<'a> {
             source,
             path,
             primary,
+            lettered_ranges: Vec::new(),
             ranges,
             search: Some(Search {
                 term: token.text.to_string(),
@@ -397,10 +436,41 @@ impl<'a> Parser<'a> {
 
     /// `selector := item (',' item)*`, stopping before the next group.
     fn selector(&mut self) -> Result<Vec<Range>, Error> {
-        let mut ranges = vec![self.item()?];
+        self.list(Self::item)
+    }
+
+    fn label(&mut self) -> Result<crate::NumberLabel, Error> {
+        let start = self.peek();
+        let mut label = crate::NumberLabel::plain(self.integer()?);
+        let next = self.peek();
+        if next.kind == Kind::Ident
+            && next.position == start.position + start.text.len()
+            && next.text.bytes().all(|b| b.is_ascii_alphabetic())
+        {
+            label.suffix = self.advance().text.to_ascii_lowercase();
+        }
+        Ok(label)
+    }
+
+    fn label_range(&mut self) -> Result<(crate::NumberLabel, crate::NumberLabel), Error> {
+        let position = self.peek().position;
+        let from = self.label()?;
+        let to = if self.eat(Kind::Dash) {
+            self.label()?
+        } else {
+            from.clone()
+        };
+        if to < from {
+            return Err(Error::InvalidRange { position });
+        }
+        Ok((from, to))
+    }
+
+    fn list<T>(&mut self, item: fn(&mut Self) -> Result<T, Error>) -> Result<Vec<T>, Error> {
+        let mut ranges = vec![item(self)?];
         while self.peek().kind == Kind::Comma && !self.group_follows() {
             self.advance();
-            ranges.push(self.item()?);
+            ranges.push(item(self)?);
         }
         Ok(ranges)
     }
